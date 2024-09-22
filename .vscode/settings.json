@@ -1,0 +1,4 @@
+{
+  "cSpell.words": ["outro"],
+  "rust-analyzer.procMacro.ignored": { "napi-derive": ["napi"] }
+}

@@ -1,0 +1,14 @@
+{
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "sourceLanguages": ["rust"],
+      "name": "DEBUG",
+      "program": "node",
+      "args": ["${workspaceFolder}/debug.js"],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "npm: build:debug"
+    }
+  ]
+}

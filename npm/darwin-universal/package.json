@@ -1,0 +1,15 @@
+{
+  "name": "rust-magic-string-darwin-universal",
+  "version": "0.0.0",
+  "os": [
+    "darwin"
+  ],
+  "main": "rust-magic-string.darwin-universal.node",
+  "files": [
+    "rust-magic-string.darwin-universal.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  }
+}
