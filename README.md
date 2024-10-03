@@ -11,31 +11,29 @@ Inspired by [magic-string-rs](https://github.com/h-a-n-a/magic-string-rs) and
 - [x] append
 - [x] appendLeft
 - [x] appendRight
-- [ ] clone
+- [x] clone
 - [ ] generateDecodedMap
 - [ ] generateMap
-- [ ] getIndentString
 - [ ] indent
-- [ ] insert
+- [x] insert
 - [x] insertLeft
 - [x] insertRight
 - [x] move
-- [ ] overwrite
-- [ ] update
+- [x] overwrite
+- [x] update
 - [x] prepend
 - [x] prependLeft
 - [x] prependRight
-- [ ] remove
-- [ ] reset
+- [x] remove
+- [x] reset
 - [ ] slice
-- [ ] snip
+- [x] snip
 - [x] toString
-- [ ] isEmpty
-- [ ] length
+- [x] isEmpty
 - [x] trimLines
 - [x] trim
 - [x] trimEnd
 - [x] trimStart
-- [ ] hasChanged
-- [ ] replace
-- [ ] replaceAll
+- [x] hasChanged
+- [x] replace
+- [x] replaceAll

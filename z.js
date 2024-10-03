@@ -23,7 +23,9 @@ function z() {
             'trimEndAborted',
             'trimStartAborted',
             'lastChar',
-            'lastLine'
+            'lastLine',
+            'length',
+            'getIndentString'
           ].includes(api)
       )
       .map(api => {

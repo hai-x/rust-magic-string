@@ -1,18 +1,24 @@
-use std::{collections::HashMap, sync::Mutex};
+use crate::error::{Error, MsErrType, Result};
 
-use regex::Regex;
-
-lazy_static! {
-  static ref REGEX_CACHE: Mutex<HashMap<String, Regex>> = Mutex::new(HashMap::new());
+pub fn slice_string(s: String, start: usize, end: usize) -> String {
+  s[start..end].to_owned()
 }
 
-pub fn rx_new(pattern_str: String) -> Regex {
-  let pattern = format!(r"{}", pattern_str);
-  let mut cache = REGEX_CACHE.lock().unwrap();
-  if let Some(regex) = cache.get(&pattern) {
-    return regex.clone();
+pub fn _normalize_range(str: &str, start: i32, end: i32) -> Result<(u32, u32)> {
+  let mut _start = start;
+  let mut _end = end;
+  let len = str.len() as i32;
+  if len > 0 {
+    while _start < 0 {
+      _start += len;
+    }
+    while _end < 0 {
+      _end += len;
+    }
   }
-  let regex = Regex::new(&pattern).unwrap();
-  cache.insert(pattern.clone(), regex.clone());
-  regex
+
+  if _end > len {
+    return Err(Error::from_reason(MsErrType::Range, "end is out of bounds"));
+  }
+  Ok((_start as u32, _end as u32))
 }

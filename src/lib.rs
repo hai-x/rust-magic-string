@@ -11,4 +11,5 @@ extern crate lazy_static;
 pub mod error;
 pub mod internal_magic_string;
 pub mod magic_string;
+pub mod reg;
 pub mod utils;

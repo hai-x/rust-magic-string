@@ -1,8 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
+use crate::error::{Error, MsErrType, Result};
 use regex::Regex;
-
-use crate::error::MagicStringError;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Chunk {
@@ -32,6 +31,15 @@ impl Chunk {
       previous: None,
       next: None,
     }
+  }
+  pub fn self_clone(&self) -> Chunk {
+    let mut cloned = Chunk::new(self.start, self.end, self.original.as_str());
+    cloned.intro = self.intro.clone();
+    cloned.intro = self.outro.clone();
+    cloned.content = self.content.clone();
+    cloned.store_name = self.store_name;
+    cloned.edited = self.edited;
+    cloned
   }
 
   pub fn append_left(&mut self, str: &str) -> &Self {
@@ -139,14 +147,11 @@ impl Chunk {
     false
   }
 
-  pub fn split(
-    chunk: Rc<RefCell<Chunk>>,
-    index: u32,
-  ) -> Result<Rc<RefCell<Chunk>>, MagicStringError> {
+  pub fn split(chunk: Rc<RefCell<Chunk>>, index: u32) -> Result<Rc<RefCell<Chunk>>> {
     let mut cur_chunk = chunk.borrow_mut();
 
     if index < cur_chunk.start {
-      return Err(MagicStringError::SplitPointIndexError);
+      return Err(Error::new(MsErrType::Range));
     }
 
     // split str
@@ -174,6 +179,17 @@ impl Chunk {
     cur_chunk.outro.clear();
     if cur_chunk.next.is_some() {
       cur_chunk.next.as_mut().unwrap().borrow_mut().previous = Some(new_chunk.clone());
+    }
+
+    // weird logic from 'magic-string'
+    // For me, the logic makes `overwrite after remove` content correct
+    // ```js
+    //    const snippet = s.snip(0, 6)
+    //    snippet.overwrite(6, 9, 'GHI')
+    // ```
+    if cur_chunk.edited {
+      new_chunk.borrow_mut().edit("", false, false);
+      cur_chunk.content = "".to_string();
     }
     cur_chunk.next = Some(new_chunk.clone());
 

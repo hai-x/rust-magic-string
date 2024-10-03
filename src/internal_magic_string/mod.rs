@@ -1,13 +1,33 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, vec};
 
-use napi::Error;
+use crate::{
+  error::{Error, MsErrType, Result},
+  reg::match_fn,
+  utils::{_normalize_range, slice_string},
+};
 
 mod chunk;
 use chunk::Chunk;
 
-use crate::error::MagicStringError;
+use crate::reg::rx_new;
 
-use crate::utils::rx_new;
+#[derive(Clone)]
+#[napi(object)]
+pub struct OverwriteOptions {
+  pub content_only: Option<bool>,
+  pub store_name: Option<bool>,
+  pub overwrite: Option<bool>,
+}
+
+impl Default for OverwriteOptions {
+  fn default() -> Self {
+    Self {
+      content_only: Some(false),
+      store_name: Some(false),
+      overwrite: Some(false),
+    }
+  }
+}
 
 #[allow(non_camel_case_types)]
 pub struct __internal_magic_string {
@@ -21,6 +41,7 @@ pub struct __internal_magic_string {
   last_searched_chunk: Rc<RefCell<Chunk>>,
   first_chunk: Rc<RefCell<Chunk>>,
   last_chunk: Rc<RefCell<Chunk>>,
+  store_names: Vec<String>,
 }
 
 impl __internal_magic_string {
@@ -39,20 +60,22 @@ impl __internal_magic_string {
       last_searched_chunk: Rc::clone(&chunk),
       first_chunk: Rc::clone(&chunk),
       last_chunk: Rc::clone(&chunk),
+
+      store_names: vec![],
     }
   }
 
-  pub fn append(&mut self, str: &str) -> Result<&mut Self, Error> {
+  pub fn append(&mut self, str: &str) -> Result<&mut Self> {
     self.outro = format!("{}{}", self.outro, str);
     Ok(self)
   }
 
-  pub fn prepend(&mut self, str: &str) -> Result<&mut Self, Error> {
+  pub fn prepend(&mut self, str: &str) -> Result<&mut Self> {
     self.intro = format!("{}{}", str, self.intro);
     Ok(self)
   }
 
-  pub fn append_left(&mut self, index: u32, content: &str) -> Result<&mut Self, Error> {
+  pub fn append_left(&mut self, index: u32, content: &str) -> Result<&mut Self> {
     self._split(index)?;
     if let Some(chunk) = self.end_index_chunk_map.get(&index) {
       let mut chunk = chunk.borrow_mut();
@@ -63,7 +86,7 @@ impl __internal_magic_string {
     Ok(self)
   }
 
-  pub fn append_right(&mut self, index: u32, content: &str) -> Result<&mut Self, Error> {
+  pub fn append_right(&mut self, index: u32, content: &str) -> Result<&mut Self> {
     self._split(index)?;
     if let Some(chunk) = self.start_index_chunk_map.get(&index) {
       let mut chunk: std::cell::RefMut<'_, Chunk> = chunk.borrow_mut();
@@ -74,7 +97,7 @@ impl __internal_magic_string {
     Ok(self)
   }
 
-  pub fn prepend_left(&mut self, index: u32, content: &str) -> Result<&mut Self, Error> {
+  pub fn prepend_left(&mut self, index: u32, content: &str) -> Result<&mut Self> {
     self._split(index)?;
     if let Some(chunk) = self.end_index_chunk_map.get(&index) {
       let mut chunk: std::cell::RefMut<'_, Chunk> = chunk.borrow_mut();
@@ -85,7 +108,7 @@ impl __internal_magic_string {
     Ok(self)
   }
 
-  pub fn prepend_right(&mut self, index: u32, content: &str) -> Result<&mut Self, Error> {
+  pub fn prepend_right(&mut self, index: u32, content: &str) -> Result<&mut Self> {
     self._split(index)?;
     if let Some(chunk) = self.start_index_chunk_map.get(&index) {
       let mut chunk: std::cell::RefMut<'_, Chunk> = chunk.borrow_mut();
@@ -163,25 +186,26 @@ impl __internal_magic_string {
     self
   }
 
-  pub fn _move(&mut self, start: u32, end: u32, index: u32) -> Result<&mut Self, Error> {
-    if index >= start && index <= end {
-      return Err(Error::from(MagicStringError::MoveSelectionError));
+  pub fn _move(&mut self, start: i32, end: i32, index: u32) -> Result<&mut Self> {
+    let (_start, _end) = _normalize_range(self.original.as_str(), start, end)?;
+
+    if index >= _start && index <= _end {
+      return Err(Error::from_reason(
+        MsErrType::Range,
+        "Index must be in the range of Start and End",
+      ));
     }
 
-    if start > end {
-      return Err(Error::from(MagicStringError::MoveStartLargerError));
-    }
-
-    self._split(start)?;
-    self._split(end)?;
+    self._split(_start)?;
+    self._split(_end)?;
     self._split(index)?;
 
     let first = self
       .start_index_chunk_map
-      .get(&start)
+      .get(&_start)
       .map(Rc::clone)
       .unwrap();
-    let last = self.end_index_chunk_map.get(&end).map(Rc::clone).unwrap();
+    let last = self.end_index_chunk_map.get(&_end).map(Rc::clone).unwrap();
 
     let old_left = first.borrow().clone().previous;
     let old_right = last.borrow().clone().next;
@@ -236,7 +260,218 @@ impl __internal_magic_string {
     Ok(self)
   }
 
-  fn _split(&mut self, index: u32) -> Result<(), Error> {
+  pub fn overwrite(
+    &mut self,
+    start: i32,
+    end: i32,
+    content: &str,
+    option: Option<OverwriteOptions>,
+  ) -> Result<&mut Self> {
+    let mut option = option.unwrap_or_default();
+    option.overwrite = Some(!option.content_only.unwrap_or_default());
+    self.update(start, end, content, Some(option))
+  }
+
+  pub fn update(
+    &mut self,
+    start: i32,
+    end: i32,
+    content: &str,
+    option: Option<OverwriteOptions>,
+  ) -> Result<&mut Self> {
+    let option = option.unwrap_or_default();
+    let store_name = option.store_name.unwrap_or_default();
+    let content_only = option.content_only.unwrap_or_default();
+
+    let (_start, _end) = _normalize_range(self.original.as_str(), start, end)?;
+
+    if _start == _end {
+      return Err(Error::from_reason(
+        MsErrType::Range,
+        "Cannot overwrite a zero-length range – use appendLeft or prependRight instead",
+      ));
+    }
+
+    self._split(_start)?;
+    self._split(_end)?;
+
+    if store_name {
+      let original = self.original.clone();
+      self
+        .store_names
+        .push(slice_string(original, _start as usize, _end as usize));
+    }
+
+    let first = self.start_index_chunk_map.get(&_start);
+    let last = self.end_index_chunk_map.get(&_end);
+
+    if first.is_some() && last.is_some() {
+      let first = Rc::clone(first.unwrap());
+      first.borrow_mut().edit(
+        content,
+        store_name,
+        !option.overwrite.unwrap_or_else(|| false),
+      );
+      let last = Rc::clone(last.unwrap());
+      let mut cur = Some(first);
+      while cur.is_some() && cur.clone().unwrap() != last {
+        let c = cur.as_ref().unwrap();
+        if c.borrow().next.as_ref() != self.start_index_chunk_map.get(&c.borrow().end) {
+          return Err(Error::from_reason(
+            MsErrType::Overwrite,
+            "Cannot overwrite across a split point",
+          ));
+        }
+        let next = c.borrow().next.clone();
+        next.clone().unwrap().borrow_mut().edit("", false, false);
+        cur = next;
+      }
+    } else {
+      let mut new_chunk = Chunk::new(_start, _end, "");
+      new_chunk.edit(content, store_name, content_only);
+
+      if let Some(_last) = last {
+        new_chunk.previous = Some(Rc::clone(_last));
+        _last.borrow_mut().next = Some(Rc::new(RefCell::new(new_chunk)))
+      }
+    }
+
+    Ok(self)
+  }
+
+  pub fn remove(&mut self, start: i32, end: i32) -> Result<&Self> {
+    let (_start, _end) = _normalize_range(self.original.as_str(), start, end)?;
+
+    if _start == _end {
+      return Ok(self);
+    }
+
+    self._split(_start)?;
+    self._split(_end)?;
+
+    let first = self.start_index_chunk_map.get(&_start);
+    let last = self.end_index_chunk_map.get(&_end);
+    let mut cur = first.and_then(|r| Some(r.to_owned()));
+
+    if first.is_some() && last.is_some() {
+      while cur.is_some() && cur.clone().unwrap().borrow().end <= _end {
+        let c = Rc::clone(&cur.unwrap());
+        c.borrow_mut().edit("", false, false);
+        cur = c.borrow().next.clone();
+      }
+    }
+    Ok(self)
+  }
+
+  pub fn has_changed(&self) -> bool {
+    self.original != self.to_string()
+  }
+
+  pub fn clone(&self) -> __internal_magic_string {
+    let mut cloned = __internal_magic_string::new(self.original.as_str());
+    cloned.first_chunk = Rc::new(RefCell::new(self.first_chunk.borrow().self_clone()));
+    cloned.last_chunk = Rc::clone(&cloned.first_chunk);
+    cloned.last_searched_chunk = Rc::clone(&cloned.first_chunk);
+
+    let mut original_chunk = Some(Rc::clone(&self.first_chunk));
+    let mut cloned_chunk = Some(Rc::clone(&cloned.first_chunk));
+
+    while let Some(o) = original_chunk {
+      if let Some(c) = cloned_chunk {
+        // update `cloned chunk`
+        cloned
+          .start_index_chunk_map
+          .insert(c.borrow().start, Rc::clone(&c));
+        cloned
+          .end_index_chunk_map
+          .insert(c.borrow().end, Rc::clone(&c));
+
+        // update `next cloned chunk`
+        let original_next = o.borrow().next.clone();
+        let cloned_next = if original_next.is_some() {
+          let mut cloned_next = original_next.unwrap().borrow().self_clone();
+          cloned_next.previous = Some(c.clone());
+          Some(Rc::new(RefCell::new(cloned_next)))
+        } else {
+          None
+        };
+
+        // connect `cloned chunk` and `next cloned chunk`
+        cloned_chunk = if cloned_next.is_some() {
+          c.borrow_mut().next = cloned_next.clone();
+          cloned.last_chunk = Rc::clone(&cloned_next.clone().unwrap());
+          cloned_next.clone()
+        } else {
+          None
+        }
+      }
+      original_chunk = o.borrow().next.clone();
+    }
+
+    cloned.intro = self.intro.clone();
+    cloned.outro = self.outro.clone();
+
+    cloned
+  }
+
+  pub fn snip(&mut self, start: i32, end: i32) -> Result<__internal_magic_string> {
+    let mut cloned = self.clone();
+    cloned.remove(0, start)?;
+    cloned.remove(end, cloned.original.len() as i32)?;
+    Ok(cloned)
+  }
+
+  pub fn reset(&mut self, start: i32, end: i32) -> Result<&Self> {
+    let (_start, _end) = _normalize_range(self.original.as_str(), start, end)?;
+    if _start == _end {
+      return Ok(self);
+    }
+    self._split(_start)?;
+    self._split(_end)?;
+    let mut first = self.start_index_chunk_map.get(&_start).map(Rc::clone);
+    while let Some(c) = first {
+      c.borrow_mut().reset();
+      first = if _end > c.borrow().end {
+        self
+          .start_index_chunk_map
+          .get(&c.borrow().end)
+          .map(Rc::clone)
+      } else {
+        None
+      }
+    }
+    Ok(self)
+  }
+
+  pub fn replace(&mut self, search_value: &str, replacement: &str) -> Result<&Self> {
+    let reg = rx_new(search_value.to_string());
+    let matches = match_fn(&reg, self.original.as_str(), false);
+    for (_, match_item) in matches.iter().enumerate() {
+      self.overwrite(
+        match_item.start as i32,
+        match_item.end as i32,
+        replacement,
+        None,
+      )?;
+    }
+    Ok(self)
+  }
+
+  pub fn replace_all(&mut self, search_value: &str, replacement: &str) -> Result<&Self> {
+    let reg = rx_new(search_value.to_string());
+    let matches = match_fn(&reg, self.original.as_str(), true);
+    for (_, match_item) in matches.iter().enumerate() {
+      self.overwrite(
+        match_item.start as i32,
+        match_item.end as i32,
+        replacement,
+        None,
+      )?;
+    }
+    Ok(self)
+  }
+
+  fn _split(&mut self, index: u32) -> Result<()> {
     if self.start_index_chunk_map.contains_key(&index)
       || self.end_index_chunk_map.contains_key(&index)
     {
@@ -273,7 +508,7 @@ impl __internal_magic_string {
     Ok(())
   }
 
-  fn _split_chunk(&mut self, chunk: Rc<RefCell<Chunk>>, index: u32) -> Result<(), Error> {
+  fn _split_chunk(&mut self, chunk: Rc<RefCell<Chunk>>, index: u32) -> Result<()> {
     let new_chunk = Chunk::split(Rc::clone(&chunk), index)?;
     self
       .start_index_chunk_map
