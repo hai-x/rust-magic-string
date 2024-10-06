@@ -1,6 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::error::{Error, MsErrType, Result};
+use crate::error::{Error, MsErrType};
+use crate::result::Result;
 use regex::Regex;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -32,6 +33,11 @@ impl Chunk {
       next: None,
     }
   }
+
+  pub fn is_edited(&self) -> bool {
+    self.edited || (self.original.len() != self.content.len()) || self.original != self.content
+  }
+
   pub fn self_clone(&self) -> Chunk {
     let mut cloned = Chunk::new(self.start, self.end, self.original.as_str());
     cloned.intro = self.intro.clone();
@@ -187,13 +193,51 @@ impl Chunk {
     //    const snippet = s.snip(0, 6)
     //    snippet.overwrite(6, 9, 'GHI')
     // ```
-    if cur_chunk.edited {
+    if cur_chunk.is_edited() {
       new_chunk.borrow_mut().edit("", false, false);
       cur_chunk.content = "".to_string();
     }
-    cur_chunk.next = Some(new_chunk.clone());
+    cur_chunk.next = Some(Rc::clone(&new_chunk));
 
     Ok(new_chunk)
+  }
+
+  pub fn each_next<F>(chunk: Rc<RefCell<Chunk>>, mut f: F) -> Result<()>
+  where
+    F: FnMut(Rc<RefCell<Chunk>>) -> Result<bool>,
+  {
+    let mut cur = Some(chunk);
+    while let Some(c) = cur {
+      match f(Rc::clone(&c)) {
+        Ok(finish) => {
+          if finish {
+            break;
+          }
+        }
+        Err(e) => return Err(e),
+      }
+      cur = c.borrow().next.as_ref().map(Rc::clone);
+    }
+    Ok(())
+  }
+
+  pub fn each_previous<F>(chunk: Rc<RefCell<Chunk>>, mut f: F) -> Result<()>
+  where
+    F: FnMut(Rc<RefCell<Chunk>>) -> Result<bool>,
+  {
+    let mut cur = Some(chunk);
+    while let Some(c) = cur {
+      match f(Rc::clone(&c)) {
+        Ok(finish) => {
+          if finish {
+            break;
+          }
+        }
+        Err(e) => return Err(e),
+      }
+      cur = c.borrow().previous.as_ref().map(Rc::clone);
+    }
+    Ok(())
   }
 }
 

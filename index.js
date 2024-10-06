@@ -323,6 +323,8 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { MagicString } = nativeBinding
+const { MagicString, DecodedMap, SourceMap } = nativeBinding
 
 module.exports.MagicString = MagicString
+module.exports.DecodedMap = DecodedMap
+module.exports.SourceMap = SourceMap

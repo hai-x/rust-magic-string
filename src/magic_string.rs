@@ -1,9 +1,13 @@
 use crate::{
   error::{Error, MsErrType},
-  internal_magic_string::{OverwriteOptions, __internal_magic_string},
+  internal_magic_string::{
+    GenerateMapOptions, MagicStringOptions, OverwriteOptions, __internal_magic_string,
+  },
+  source_map::{DecodedMap, SourceMap},
+  utils::JsRegExp,
 };
 
-use napi::Result;
+use napi::{bindgen_prelude::Either, JsFunction, Result};
 
 #[napi]
 struct MagicString(__internal_magic_string);
@@ -12,8 +16,8 @@ struct MagicString(__internal_magic_string);
 #[napi]
 impl MagicString {
   #[napi(constructor)]
-  pub fn new(str: String) -> MagicString {
-    MagicString(__internal_magic_string::new(str.as_str()))
+  pub fn new(str: String, options: Option<MagicStringOptions>) -> MagicString {
+    MagicString(__internal_magic_string::new(str.as_str(), options))
   }
 
   #[napi]
@@ -183,18 +187,93 @@ impl MagicString {
   }
 
   #[napi]
-  pub fn replace(&mut self, search_value: String, replacement: String) -> Result<&Self> {
-    self
-      .0
-      .replace(search_value.as_str(), replacement.as_str())?;
+  pub fn replace(
+    &mut self,
+    search_value: Either<String, JsRegExp>,
+    replacement: Either<String, JsFunction>,
+  ) -> Result<&Self> {
+    match replacement {
+      Either::A(replacement) => match search_value {
+        Either::A(str) => {
+          self.0._replace_string(str.as_str(), replacement.as_str())?;
+        }
+        Either::B(reg_exp) => {
+          self.0._replace_regexp(
+            reg_exp.rule.as_str(),
+            replacement.as_str(),
+            reg_exp.global.unwrap_or_default(),
+          )?;
+        }
+      },
+      Either::B(_) => {
+        return Err(
+          Error::from_reason(
+            MsErrType::Type,
+            "`replacement` argument do not supports RegExp replacerFn now",
+          )
+          .into(),
+        );
+      }
+    }
+
     Ok(self)
   }
 
   #[napi]
-  pub fn replace_all(&mut self, search_value: String, replacement: String) -> Result<&Self> {
-    self
-      .0
-      .replace_all(search_value.as_str(), replacement.as_str())?;
+  pub fn replace_all(
+    &mut self,
+    search_value: Either<String, JsRegExp>,
+    replacement: Either<String, JsFunction>,
+  ) -> Result<&Self> {
+    match replacement {
+      Either::A(replacement) => match search_value {
+        Either::A(search_value) => {
+          self
+            .0
+            ._replace_all_string(search_value.as_str(), replacement.as_str())?;
+        }
+        Either::B(reg_exp) => {
+          let global = reg_exp.global.unwrap_or_default();
+          if !global {
+            return Err(
+              Error::from_reason(
+                MsErrType::Type,
+                "replaceAll called with a non-global RegExp argument",
+              )
+              .into(),
+            );
+          }
+          self
+            .0
+            ._replace_regexp(reg_exp.rule.as_str(), replacement.as_str(), global)?;
+        }
+      },
+      Either::B(_) => {
+        return Err(
+          Error::from_reason(
+            MsErrType::Type,
+            "`replacement` argument do not supports RegExp replacerFn now",
+          )
+          .into(),
+        );
+      }
+    }
+
     Ok(self)
+  }
+
+  #[napi]
+  pub fn generate_map(&mut self, options: Option<GenerateMapOptions>) -> Result<SourceMap> {
+    let map = self.0.generate_map(options)?;
+    Ok(map)
+  }
+
+  #[napi]
+  pub fn generate_decoded_map(
+    &mut self,
+    options: Option<GenerateMapOptions>,
+  ) -> Result<DecodedMap> {
+    let map = self.0.generate_decoded_map(options)?;
+    Ok(map)
   }
 }

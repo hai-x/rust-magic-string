@@ -3,9 +3,9 @@ import MagicString from 'magic-string'
 
 const validate = handle => {
   const res = []
-  ;[RustMagicString, MagicString].map(Cons => {
-    res.push(handle(Cons))
-  })
+    ;[RustMagicString, MagicString].map(Cons => {
+      res.push(handle(Cons))
+    })
   expect(res[0]).toBe(res[1])
 }
 
@@ -82,7 +82,6 @@ describe('MagicString', () => {
         s.prependLeft(1, 'D')
         s.prependLeft(1, 'C')
         s.prependLeft(1, 'B')
-
         return s.toString()
       })
     })
@@ -226,7 +225,7 @@ describe('MagicString', () => {
     it('normal', () => {
       const s = new RustMagicString('abcdefghijkl')
       expect(() => s.insert()).toThrow(
-        '<rust-magic-string> Deprecated api: magicString.insert(...) is deprecated. Use prependRight(...) or appendLeft(...)'
+        'Deprecated api error: magicString.insert(...) is deprecated. Use prependRight(...) or appendLeft(...)'
       )
     })
   })
@@ -392,18 +391,14 @@ describe('MagicString', () => {
       })
     })
 
-    // it('should provide a useful error when illegal removals are attempted', () => {
-    //   validate(Cons => {
-    //     const s = new Cons('abcdefghijkl');
-
-    //     s.remove(4, 8);
-
-    //     s.overwrite(5, 7, 'XX');
-
-    //     // TODO:
-    //     assert.throws(() => s.reset(4, 6), /Cannot split a chunk that has already been edited/);
-    //   })
-    // });
+    it('should provide a useful error when illegal removals are attempted', () => {
+      const s = new RustMagicString('abcdefghijkl')
+      s.remove(4, 8)
+      s.overwrite(5, 7, 'XX')
+      expect(() => s.reset(4, 6)).toThrow(
+        'Split chunk error: Cannot split a chunk that has already been edited'
+      )
+    })
 
     it('removes across moved content', () => {
       validate(Cons => {
@@ -417,34 +412,474 @@ describe('MagicString', () => {
   })
 
   describe('replace', () => {
+    it('rejects when replacerFn', () => {
+      expect(() =>
+        new RustMagicString('123').replace(
+          {
+            rule: '1',
+            global: true
+          },
+          () => { }
+        )
+      ).toThrow('`replacement` argument do not supports RegExp replacerFn now')
+    })
+
     it('works with string replace', () => {
       validate(Cons => {
-        const code = '1 2 1 2'
+        const code = '你好中文字符中文串中文'
         const s = new Cons(code)
-        s.replace('2', '3')
+        s.replace('中', 'ララ')
         return s.toString()
       })
     })
 
-    // TODO:
-    // it('Should not treat string as regexp', () => {
-    //   validate(Cons => {
-    //     const code = '1234'
-    //     const s = new Cons(code)
-    //     s.replace('.', '*')
-    //     return s.toString()
-    //   })
-    // })
+    it('Should not treat string as regexp', () => {
+      validate(Cons => {
+        const s = new Cons('1234')
+        s.replace('.', '*')
+        return s.toString()
+      })
+    })
+
+    it('Should use substitution directly', () => {
+      validate(Cons => {
+        const s = new Cons('1234')
+        s.replace('1', '$0$1')
+        return s.toString()
+      })
+    })
+
+    it('Should not search back', () => {
+      validate(Cons => {
+        const s = new Cons('122121')
+        s.replace('12', '21')
+        return s.toString()
+      })
+    })
+
+    it('works with global regex replace', () => {
+      const s = new RustMagicString('1 2 3 4 a b c')
+      s.replace(
+        {
+          rule: '(\\d)',
+          global: true
+        },
+        'xx$1$10'
+      )
+
+      const s2 = new MagicString('1 2 3 4 a b c')
+      s2.replace(/(\d)/g, 'xx$1$10')
+      expect(s.toString()).toBe(s2.toString())
+    })
+
+    it('works with global regex replace $$', () => {
+      const s = new RustMagicString('1 2 3 4 a b c')
+      s.replace(
+        {
+          rule: '(\\d)',
+          global: true
+        },
+        '$$'
+      )
+
+      const s2 = new MagicString('1 2 3 4 a b c')
+      s2.replace(/(\d)/g, '$$')
+      expect(s.toString()).toBe(s2.toString())
+    })
   })
 
   describe('replaceAll', () => {
-    it('works with string replace', () => {
+    it('works with string replace 1', () => {
       validate(Cons => {
-        const code = '1 2 1 2'
-        const s = new Cons(code)
+        const s = new Cons('1212')
         s.replaceAll('2', '3')
         return s.toString()
       })
     })
+
+    it('works with string replace 2', () => {
+      validate(Cons => {
+        const s = new Cons('プログラマーズマ')
+        s.replaceAll('マ', 'ララ')
+        return s.toString()
+      })
+    })
+
+    it('works with string replace 3', () => {
+      validate(Cons => {
+        const s = new Cons('Здрайвйсйтйвуйте')
+        s.replaceAll('й', 'д')
+        return s.toString()
+      })
+    })
+
+    it('works with string replace 4', () => {
+      validate(Cons => {
+        const s = new Cons('你好中文字符中文串中文')
+        s.replaceAll('中', 'ララ')
+        return s.toString()
+      })
+    })
+
+    it('Should not treat string as regexp', () => {
+      validate(Cons => {
+        const s = new Cons('1234')
+        s.replaceAll('.', '*')
+        return s.toString()
+      })
+    })
+
+    it('Should use substitution directly', () => {
+      validate(Cons => {
+        const s = new Cons('11')
+        s.replaceAll('1', '$0$1')
+        return s.toString()
+      })
+    })
+
+    it('Should not search back', () => {
+      validate(Cons => {
+        const s = new Cons('121212')
+        s.replaceAll('12', '21')
+        return s.toString()
+      })
+    })
+
+    it('global regex result the same as .replace 1', () => {
+      const s = new RustMagicString('1 2 3 4 a b c')
+      s.replaceAll(
+        {
+          rule: '(\\d)',
+          global: true
+        },
+        'xx$1$10'
+      )
+
+      const s2 = new MagicString('1 2 3 4 a b c')
+      s2.replaceAll(/(\d)/g, 'xx$1$10')
+      expect(s.toString()).toBe(s2.toString())
+    })
+    it('global regex result the same as .replace 2', () => {
+      const s = new RustMagicString('1 2 3 4 a b c')
+      s.replaceAll(
+        {
+          rule: '(\\d)',
+          global: true
+        },
+        '$$'
+      )
+
+      const s2 = new MagicString('1 2 3 4 a b c')
+      s2.replaceAll(/(\d)/g, '$$')
+      expect(s.toString()).toBe(s2.toString())
+    })
+
+    it('rejects when non-global regexp', () => {
+      expect(() =>
+        new RustMagicString('123').replaceAll(
+          {
+            rule: '1',
+            global: false
+          },
+          '1'
+        )
+      ).toThrow(
+        'TypeError: replaceAll called with a non-global RegExp argument'
+      )
+    })
+
+    it('rejects when replacerFn', () => {
+      expect(() =>
+        new RustMagicString('123').replaceAll(
+          {
+            rule: '1',
+            global: true
+          },
+          () => { }
+        )
+      ).toThrow(
+        'TypeError: `replacement` argument do not supports RegExp replacerFn now'
+      )
+    })
+  })
+
+  describe('generateMap', () => {
+    it('should generate a sourcemap', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl').remove(3, 9)
+        return s.generateMap().mappings
+      })
+    })
+
+    it('should generate a correct sourcemap for prepend content when hires = false', () => {
+      validate(Cons => {
+        const s = new Cons('x\nq')
+
+        s.prepend('y\n')
+
+        return s.generateMap().mappings
+      })
+    })
+
+    it('should generate a correct sourcemap for indented content', () => {
+      validate(Cons => {
+        const s = new Cons(
+          'var answer = 42;\nconsole.log("the answer is %s", answer);'
+        )
+
+        s.prepend("'use strict';\n\n")
+
+        // TODO:
+        // s.indent('\t').prepend('(function () {\n').append('\n}).call(global);')
+
+        return s.generateMap().mappings
+      })
+    })
+
+    it('should generate a sourcemap using specified locations', () => {
+      validate(Cons => {
+        const s = new Cons(
+          'var answer = 42;\nconsole.log("the answer is %s", answer);'
+        )
+        // TODO:
+        // s.addSourcemapLocation(0)
+        // s.addSourcemapLocation(3)
+        // s.addSourcemapLocation(10)
+
+        s.remove(6, 9)
+
+        return s.generateMap().mappings
+      })
+    })
+
+    it('should correctly map inserted content', () => {
+      validate(Cons => {
+        const s = new Cons('function Foo () {}')
+
+        s.overwrite(9, 12, 'Bar')
+        return s.generateMap().mappings
+      })
+    })
+
+    it('should yield consistent results between appendLeft and prependRight', () => {
+      validate(Cons => {
+        const s1 = new Cons('abcdefghijkl')
+        s1.appendLeft(6, 'X')
+
+        const s2 = new Cons('abcdefghijkl')
+        s2.prependRight(6, 'X')
+
+        return s1.generateMap().mappings + s2.generateMap().mappings
+      })
+    })
+
+    // it('should recover original names', () => {
+    //   const s = new MagicString('function Foo () {}');
+
+    //   s.overwrite(9, 12, 'Bar', { storeName: true });
+
+    //   const map = s.generateMap({
+    //     file: 'output.js',
+    //     source: 'input.js',
+    //     includeContent: true
+    //   });
+
+    //   const smc = new SourceMapConsumer(map);
+
+    //   const loc = smc.originalPositionFor({ line: 1, column: 9 });
+    //   assert.equal(loc.name, 'Foo');
+    // });
+
+    // it('should generate one segment per replacement', () => {
+    //   const s = new MagicString('var answer = 42');
+    //   s.overwrite(4, 10, 'number', { storeName: true });
+
+    //   const map = s.generateMap({
+    //     file: 'output.js',
+    //     source: 'input.js',
+    //     includeContent: true
+    //   });
+
+    //   const smc = new SourceMapConsumer(map);
+
+    //   let numMappings = 0;
+    //   smc.eachMapping(() => numMappings += 1);
+
+    //   assert.equal(numMappings, 3); // one at 0, one at the edit, one afterwards
+    // });
+
+    // it('should generate a sourcemap that correctly locates moved content', () => {
+    //   const s = new MagicString('abcdefghijkl');
+    //   s.move(3, 6, 9);
+
+    //   const result = s.toString();
+    //   const map = s.generateMap({
+    //     file: 'output.js',
+    //     source: 'input.js',
+    //     includeContent: true,
+    //     hires: true
+    //   });
+
+    //   const smc = new SourceMapConsumer(map);
+
+    //   'abcdefghijkl'.split('').forEach((letter, i) => {
+    //     const column = result.indexOf(letter);
+    //     const loc = smc.originalPositionFor({ line: 1, column });
+
+    //     assert.equal(loc.line, 1);
+    //     assert.equal(loc.column, i);
+    //   });
+    // });
+
+    // it('generates a map with trimmed content (#53)', () => {
+    //   const s1 = new MagicString('abcdefghijkl ').trim();
+    //   const map1 = s1.generateMap({
+    //     file: 'output',
+    //     source: 'input',
+    //     includeContent: true,
+    //     hires: true
+    //   });
+
+    //   const smc1 = new SourceMapConsumer(map1);
+    //   const loc1 = smc1.originalPositionFor({ line: 1, column: 11 });
+
+    //   assert.equal(loc1.column, 11);
+
+    //   const s2 = new MagicString(' abcdefghijkl').trim();
+    //   const map2 = s2.generateMap({
+    //     file: 'output',
+    //     source: 'input',
+    //     includeContent: true,
+    //     hires: true
+    //   });
+
+    //   const smc2 = new SourceMapConsumer(map2);
+    //   const loc2 = smc2.originalPositionFor({ line: 1, column: 1 });
+
+    //   assert.equal(loc2.column, 2);
+    // });
+
+    // it('skips empty segments at the start', () => {
+    //   const s = new MagicString('abcdefghijkl');
+    //   s.remove(0, 3).remove(3, 6);
+
+    //   const map = s.generateMap();
+    //   const smc = new SourceMapConsumer(map);
+    //   const loc = smc.originalPositionFor({ line: 1, column: 6 });
+
+    //   assert.equal(loc.column, 6);
+    // });
+
+    // it('skips indentation at the start', () => {
+    //   const s = new MagicString('abcdefghijkl');
+    //   s.indent('    ');
+
+    //   const map = s.generateMap();
+    //   assert.equal(map.mappings, 'IAAA');
+    // });
+
+    // it('generates x_google_ignoreList', () => {
+    //   const s = new MagicString('function foo(){}', {
+    //     ignoreList: true
+    //   });
+
+    //   const map = s.generateMap({ source: 'foo.js' });
+    //   assert.deepEqual(map.sources, ['foo.js']);
+    //   assert.deepEqual(map.x_google_ignoreList, [0]);
+    // });
+
+    // it('generates segments per word boundary with hires "boundary"', () => {
+    //   const s = new MagicString('function foo(){ console.log("bar") }');
+
+    //   // rename bar to hello
+    //   s.overwrite(29, 32, 'hello');
+
+    //   const map = s.generateMap({
+    //     file: 'output.js',
+    //     source: 'input.js',
+    //     includeContent: true,
+    //     hires: 'boundary'
+    //   });
+
+    //   assert.equal(map.mappings, 'AAAA,QAAQ,CAAC,GAAG,CAAC,CAAC,CAAC,CAAC,OAAO,CAAC,GAAG,CAAC,CAAC,KAAG,CAAC,CAAC,CAAC');
+
+    //   const smc = new SourceMapConsumer(map);
+    //   let loc;
+
+    //   loc = smc.originalPositionFor({ line: 1, column: 3 });
+    //   assert.equal(loc.line, 1);
+    //   assert.equal(loc.column, 0);
+
+    //   loc = smc.originalPositionFor({ line: 1, column: 11 });
+    //   assert.equal(loc.line, 1);
+    //   assert.equal(loc.column, 9);
+
+    //   loc = smc.originalPositionFor({ line: 1, column: 29 });
+    //   assert.equal(loc.line, 1);
+    //   assert.equal(loc.column, 29);
+
+    //   loc = smc.originalPositionFor({ line: 1, column: 35 });
+    //   assert.equal(loc.line, 1);
+    //   assert.equal(loc.column, 33);
+    // });
+
+    // it('generates a correct source map with update using a content containing a new line', () => {
+    //   const s = new MagicString('foobar');
+    //   s.update(3, 4, '\nbb');
+    //   assert.equal(s.toString(), 'foo\nbbar');
+
+    //   const map = s.generateMap({ hires: true });
+
+    //   const smc = new SourceMapConsumer(map);
+    //   const loc = smc.originalPositionFor({ line: 1, column: 3 });
+    //   assert.equal(loc.line, 1);
+    //   assert.equal(loc.column, 3);
+    //   const loc2 = smc.originalPositionFor({ line: 2, column: 0 });
+    //   assert.equal(loc2.line, 1);
+    //   assert.equal(loc2.column, 3);
+    //   const loc3 = smc.originalPositionFor({ line: 2, column: 1 });
+    //   assert.equal(loc3.line, 1);
+    //   assert.equal(loc3.column, 3);
+    //   const loc4 = smc.originalPositionFor({ line: 2, column: 2 });
+    //   assert.equal(loc4.line, 1);
+    //   assert.equal(loc4.column, 4);
+    // });
+
+    // it('generates a correct source map with update using content ending with a new line', () => {
+    //   const s = new MagicString('foobar');
+    //   s.update(2, 3, 'od\n');
+    //   s.update(4, 5, 'a\nnd\n');
+    //   assert.equal(s.toString(), 'food\nba\nnd\nr');
+
+    //   const map = s.generateMap({ hires: true });
+    //   const smc = new SourceMapConsumer(map);
+
+    //   // od\n
+    //   const loc = smc.originalPositionFor({ line: 1, column: 3 });
+    //   assert.equal(loc.line, 1);
+    //   assert.equal(loc.column, 2);
+    //   const loc2 = smc.originalPositionFor({ line: 1, column: 4 });
+    //   assert.equal(loc2.line, 1);
+    //   assert.equal(loc2.column, 2);
+    //   const loc3 = smc.originalPositionFor({ line: 2, column: 0 });
+    //   assert.equal(loc3.line, 1);
+    //   assert.equal(loc3.column, 3);
+    //   const loc4 = smc.originalPositionFor({ line: 2, column: 1 });
+    //   assert.equal(loc4.line, 1);
+    //   assert.equal(loc4.column, 4);
+    //   // a\nnd\n
+    //   const loc5 = smc.originalPositionFor({ line: 2, column: 2 });
+    //   assert.equal(loc5.line, 1);
+    //   assert.equal(loc5.column, 4);
+    //   const loc6 = smc.originalPositionFor({ line: 2, column: 3 });
+    //   assert.equal(loc6.line, 1);
+    //   assert.equal(loc6.column, 4);
+    //   const loc7 = smc.originalPositionFor({ line: 3, column: 0 });
+    //   assert.equal(loc7.line, 1);
+    //   assert.equal(loc7.column, 4);
+    //   const loc8 = smc.originalPositionFor({ line: 4, column: 0 });
+    //   assert.equal(loc8.line, 1);
+    //   assert.equal(loc8.column, 5);
+    // });
   })
 })

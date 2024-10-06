@@ -6,10 +6,12 @@ extern crate napi;
 extern crate napi_derive;
 
 #[macro_use]
-extern crate lazy_static;
+extern crate serde_derive;
 
 pub mod error;
 pub mod internal_magic_string;
+pub mod locator;
 pub mod magic_string;
-pub mod reg;
+pub mod result;
+pub mod source_map;
 pub mod utils;

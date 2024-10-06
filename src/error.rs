@@ -1,5 +1,6 @@
-use std::result;
+use std::{io, string};
 
+#[derive(Debug)]
 pub struct Error {
   pub err_type: MsErrType,
   pub err_msg: Option<String>,
@@ -14,7 +15,33 @@ impl Default for Error {
   }
 }
 
-pub type Result<T> = result::Result<T, Error>;
+impl From<serde_json::Error> for Error {
+  #[inline]
+  fn from(_: serde_json::Error) -> Self {
+    Error::new(MsErrType::JSON)
+  }
+}
+
+impl From<io::Error> for Error {
+  #[inline]
+  fn from(_: io::Error) -> Self {
+    Error::new(MsErrType::IO)
+  }
+}
+
+impl From<vlq::Error> for Error {
+  #[inline]
+  fn from(_: vlq::Error) -> Self {
+    Error::new(MsErrType::Vlq)
+  }
+}
+
+impl From<string::FromUtf8Error> for Error {
+  #[inline]
+  fn from(_: string::FromUtf8Error) -> Self {
+    Error::new(MsErrType::StringFromUTF8)
+  }
+}
 
 impl Error {
   pub fn new(err_type: MsErrType) -> Self {
@@ -33,27 +60,51 @@ impl Error {
 
 #[derive(Debug)]
 pub enum MsErrType {
-  Range,
-  Deprecated,
-  Overwrite,
   Default,
+  Deprecated,
+  Range,
+  Overwrite,
+  SplitChunk,
+  Type,
+  JSON,
+  IO,
+  Vlq,
+  StringFromUTF8,
 }
 
 impl From<Error> for napi::Error {
   fn from(err: Error) -> Self {
     let mut reason = String::from("<rust-magic-string> ");
     match err.err_type {
+      MsErrType::Default => {
+        reason.push_str("Default error (not expected to occur)");
+      }
+      MsErrType::Deprecated => {
+        reason.push_str("Deprecated api error");
+      }
       MsErrType::Range => {
         reason.push_str("Index out of range");
       }
       MsErrType::Overwrite => {
-        reason.push_str("Overwrite failed");
+        reason.push_str("Overwrite error");
       }
-      MsErrType::Default => {
-        reason.push_str("Unexpected error occurs");
+      MsErrType::Type => {
+        reason.push_str("TypeError");
       }
-      MsErrType::Deprecated => {
-        reason.push_str("Deprecated api");
+      MsErrType::SplitChunk => {
+        reason.push_str("Split chunk error");
+      }
+      MsErrType::JSON => {
+        reason.push_str("Json serialize error");
+      }
+      MsErrType::IO => {
+        reason.push_str("IO error");
+      }
+      MsErrType::Vlq => {
+        reason.push_str("Vlq encode error");
+      }
+      MsErrType::StringFromUTF8 => {
+        reason.push_str("String from utf-8 error");
       }
     }
     reason.push_str(": ");

@@ -1,7 +1,7 @@
 # rust-magic-string
 
-Inspired by [magic-string-rs](https://github.com/h-a-n-a/magic-string-rs) and
-[magic-string](https://github.com/Rich-Harris/magic-string)
+Rust version of [magic-string](https://github.com/Rich-Harris/magic-string).
+Inspired by [magic-string-rs](https://github.com/h-a-n-a/magic-string-rs).
 
 ## RoadMap
 
@@ -12,8 +12,8 @@ Inspired by [magic-string-rs](https://github.com/h-a-n-a/magic-string-rs) and
 - [x] appendLeft
 - [x] appendRight
 - [x] clone
-- [ ] generateDecodedMap
-- [ ] generateMap
+- [x] generateDecodedMap
+- [x] generateMap
 - [ ] indent
 - [x] insert
 - [x] insertLeft

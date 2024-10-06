@@ -1,15 +1,41 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc, vec};
 
 use crate::{
-  error::{Error, MsErrType, Result},
-  reg::match_fn,
-  utils::{_normalize_range, slice_string},
+  error::{Error, MsErrType},
+  locator::Locator,
+  result::Result,
+  source_map::{
+    mappings::{MappingsFacade, SOURCE_INDEX},
+    DecodedMap, SourceMap, SOURCEMAP_VERSION,
+  },
+  utils::{_normalize_range, get_relative_path, match_all, slice_string},
 };
 
-mod chunk;
+pub mod chunk;
 use chunk::Chunk;
+use regex::{Captures, Regex};
 
-use crate::reg::rx_new;
+#[derive(Clone)]
+#[napi(object)]
+pub struct GenerateMapOptions {
+  pub file: Option<String>,
+  pub source: Option<String>,
+  pub source_root: Option<String>,
+  pub include_content: Option<bool>,
+  pub hires: Option<bool>,
+}
+
+impl Default for GenerateMapOptions {
+  fn default() -> Self {
+    Self {
+      file: Some(String::default()),
+      source_root: Some(String::default()),
+      source: Some(String::default()),
+      include_content: Some(false),
+      hires: Some(false),
+    }
+  }
+}
 
 #[derive(Clone)]
 #[napi(object)]
@@ -29,6 +55,24 @@ impl Default for OverwriteOptions {
   }
 }
 
+#[napi(object)]
+#[derive(Clone)]
+pub struct MagicStringOptions {
+  pub filename: Option<String>,
+  pub indent_exclusion_ranges: Option<Vec<u32>>,
+  pub ignore_list: Option<bool>,
+}
+
+impl Default for MagicStringOptions {
+  fn default() -> Self {
+    Self {
+      filename: Some(String::default()),
+      indent_exclusion_ranges: Some(vec![]),
+      ignore_list: Some(false),
+    }
+  }
+}
+
 #[allow(non_camel_case_types)]
 pub struct __internal_magic_string {
   pub original: String,
@@ -41,11 +85,16 @@ pub struct __internal_magic_string {
   last_searched_chunk: Rc<RefCell<Chunk>>,
   first_chunk: Rc<RefCell<Chunk>>,
   last_chunk: Rc<RefCell<Chunk>>,
-  store_names: Vec<String>,
+  stored_names: Vec<String>,
+  ignore_list: bool,
+
+  _locator: Locator,
+  _raw_options: MagicStringOptions,
 }
 
 impl __internal_magic_string {
-  pub fn new(str: &str) -> Self {
+  pub fn new(str: &str, options: Option<MagicStringOptions>) -> Self {
+    let options = options.unwrap_or_default();
     let chunk = Rc::new(RefCell::new(Chunk::new(0, str.len() as u32, str)));
     let init_start_index_chunk_map: Vec<(u32, Rc<RefCell<Chunk>>)> = vec![(0, chunk.clone())];
     let init_end_index_chunk_map: Vec<(u32, Rc<RefCell<Chunk>>)> =
@@ -61,7 +110,11 @@ impl __internal_magic_string {
       first_chunk: Rc::clone(&chunk),
       last_chunk: Rc::clone(&chunk),
 
-      store_names: vec![],
+      stored_names: vec![],
+
+      ignore_list: options.ignore_list.unwrap_or_default(),
+      _locator: Locator::new(str),
+      _raw_options: options,
     }
   }
 
@@ -128,8 +181,8 @@ impl __internal_magic_string {
   }
 
   pub fn trim_start_aborted(&mut self, char_type: Option<&str>) -> bool {
-    let pattern = "^".to_owned() + char_type.unwrap_or("\\s") + "+";
-    let reg = rx_new(pattern);
+    let pat = "^".to_owned() + char_type.unwrap_or("\\s") + "+";
+    let reg = Regex::new(pat.as_str()).unwrap();
     self.intro = reg.replace(&self.intro, "").to_string();
     if !self.intro.is_empty() {
       return true;
@@ -155,8 +208,8 @@ impl __internal_magic_string {
   }
 
   pub fn trim_end_aborted(&mut self, char_type: Option<&str>) -> bool {
-    let pattern = char_type.unwrap_or("\\s").to_owned() + "+$";
-    let reg = rx_new(pattern);
+    let pat = char_type.unwrap_or("\\s").to_owned() + "+$";
+    let reg = Regex::new(pat.as_str()).unwrap();
     self.outro = reg.replace(&self.outro, "").to_string();
     if !self.outro.is_empty() {
       return true;
@@ -170,7 +223,7 @@ impl __internal_magic_string {
       if aborted {
         return true;
       }
-      cur = _cur.previous.clone();
+      cur = _cur.previous.as_ref().map(Rc::clone);
     }
 
     false
@@ -265,9 +318,9 @@ impl __internal_magic_string {
     start: i32,
     end: i32,
     content: &str,
-    option: Option<OverwriteOptions>,
+    options: Option<OverwriteOptions>,
   ) -> Result<&mut Self> {
-    let mut option = option.unwrap_or_default();
+    let mut option = options.unwrap_or_default();
     option.overwrite = Some(!option.content_only.unwrap_or_default());
     self.update(start, end, content, Some(option))
   }
@@ -277,9 +330,9 @@ impl __internal_magic_string {
     start: i32,
     end: i32,
     content: &str,
-    option: Option<OverwriteOptions>,
+    options: Option<OverwriteOptions>,
   ) -> Result<&mut Self> {
-    let option = option.unwrap_or_default();
+    let option = options.unwrap_or_default();
     let store_name = option.store_name.unwrap_or_default();
     let content_only = option.content_only.unwrap_or_default();
 
@@ -298,7 +351,7 @@ impl __internal_magic_string {
     if store_name {
       let original = self.original.clone();
       self
-        .store_names
+        .stored_names
         .push(slice_string(original, _start as usize, _end as usize));
     }
 
@@ -368,7 +421,8 @@ impl __internal_magic_string {
   }
 
   pub fn clone(&self) -> __internal_magic_string {
-    let mut cloned = __internal_magic_string::new(self.original.as_str());
+    let mut cloned =
+      __internal_magic_string::new(self.original.as_str(), Some(self._raw_options.clone()));
     cloned.first_chunk = Rc::new(RefCell::new(self.first_chunk.borrow().self_clone()));
     cloned.last_chunk = Rc::clone(&cloned.first_chunk);
     cloned.last_searched_chunk = Rc::clone(&cloned.first_chunk);
@@ -443,31 +497,82 @@ impl __internal_magic_string {
     Ok(self)
   }
 
-  pub fn replace(&mut self, search_value: &str, replacement: &str) -> Result<&Self> {
-    let reg = rx_new(search_value.to_string());
-    let matches = match_fn(&reg, self.original.as_str(), false);
-    for (_, match_item) in matches.iter().enumerate() {
-      self.overwrite(
-        match_item.start as i32,
-        match_item.end as i32,
-        replacement,
-        None,
-      )?;
+  pub fn _replace_regexp(
+    &mut self,
+    search_value: &str,
+    replacement: &str,
+    global: bool,
+  ) -> Result<&Self> {
+    let this = self as *mut Self;
+
+    let reg = Regex::new(search_value).unwrap();
+    let str = self.original.as_str();
+    let matches = match_all(&reg, str, global);
+
+    let get_replacement = |match_item: &Captures| {
+      let reg = Regex::new(r"\$(\$|&|(\d+))").unwrap();
+      return reg.replace(replacement, |caps: &Captures| {
+        let matched = &caps[0];
+        let i = &caps[1];
+        match i {
+          "$" => "$".to_string(),
+          "&" => matched.to_string(),
+          num_str => {
+            if let Ok(num) = num_str.parse::<usize>() {
+              if num < match_item.len() {
+                return match_item.get(num).unwrap().as_str().to_string();
+              } else {
+                format!("${}", i)
+              }
+            } else {
+              format!("${}", i)
+            }
+          }
+        }
+      });
+    };
+
+    for (idx, caps) in matches.0.iter().enumerate() {
+      let _replacement = get_replacement(caps);
+      let offset = matches.1.get(idx).unwrap_or_else(|| &0);
+      let start = (caps.get(0).unwrap().start() + *offset) as i32;
+      let end = (caps.get(0).unwrap().end() + *offset) as i32;
+      unsafe {
+        (*this).overwrite(start, end, _replacement.into_owned().as_str(), None)?;
+      }
     }
     Ok(self)
   }
 
-  pub fn replace_all(&mut self, search_value: &str, replacement: &str) -> Result<&Self> {
-    let reg = rx_new(search_value.to_string());
-    let matches = match_fn(&reg, self.original.as_str(), true);
-    for (_, match_item) in matches.iter().enumerate() {
+  pub fn _replace_string(&mut self, search_value: &str, replacement: &str) -> Result<&Self> {
+    let start = self.original.find(search_value);
+
+    if let Some(start) = start {
       self.overwrite(
-        match_item.start as i32,
-        match_item.end as i32,
+        start as i32,
+        (start + search_value.len()) as i32,
         replacement,
         None,
       )?;
     }
+
+    Ok(self)
+  }
+
+  pub fn _replace_all_string(&mut self, search_value: &str, replacement: &str) -> Result<&Self> {
+    let mut start = self.original.find(search_value);
+    let mut offset: usize = 0;
+    while let Some(_start) = start {
+      let _start = _start + offset;
+      offset = _start + search_value.len();
+      self.overwrite(_start as i32, offset as i32, replacement, None)?;
+      start = if offset <= self.original.len() {
+        self.original[offset..].find(search_value)
+      } else {
+        None
+      }
+    }
+
     Ok(self)
   }
 
@@ -509,6 +614,26 @@ impl __internal_magic_string {
   }
 
   fn _split_chunk(&mut self, chunk: Rc<RefCell<Chunk>>, index: u32) -> Result<()> {
+    if chunk.borrow().is_edited() && !chunk.borrow().content.is_empty() {
+      if let Some((line, column)) = self._locator.locate(index as usize) {
+        return Err(Error::from_reason(
+          MsErrType::SplitChunk,
+          format!(
+            "Cannot split a chunk that has already been edited ({}:{} – '{}')",
+            line,
+            column,
+            chunk.borrow().original
+          )
+          .as_str(),
+        ));
+      } else {
+        return Err(Error::from_reason(
+          MsErrType::SplitChunk,
+          "Cannot split a chunk that has already been edited",
+        ));
+      }
+    }
+
     let new_chunk = Chunk::split(Rc::clone(&chunk), index)?;
     self
       .start_index_chunk_map
@@ -522,6 +647,71 @@ impl __internal_magic_string {
       self.last_chunk = new_chunk
     }
     Ok(())
+  }
+
+  pub fn generate_map(&self, options: Option<GenerateMapOptions>) -> Result<SourceMap> {
+    let decoded_map = self.generate_decoded_map(options)?;
+    SourceMap::from_decoded_map(decoded_map)
+  }
+
+  pub fn generate_decoded_map(&self, options: Option<GenerateMapOptions>) -> Result<DecodedMap> {
+    let GenerateMapOptions {
+      file,
+      source,
+      hires,
+      include_content,
+      source_root,
+    } = options.unwrap_or_default();
+
+    let hires = hires.unwrap_or_default();
+
+    let mut map = MappingsFacade::new(hires);
+
+    map.advance(self.intro.as_str());
+
+    Chunk::each_next(Rc::clone(&self.first_chunk), |chunk| {
+      let loc = self._locator.locate(chunk.borrow().start as usize);
+      if let Some((o_line, o_column)) = loc {
+        map.add_chunk(
+          Rc::clone(&chunk),
+          (o_line as u32, o_column as u32),
+          self
+            .stored_names
+            .binary_search(&chunk.borrow().original)
+            .unwrap_or_else(|_| usize::MAX),
+        );
+      }
+      Ok(false)
+    })?;
+
+    map.advance(self.outro.as_str());
+
+    Ok(DecodedMap {
+      version: SOURCEMAP_VERSION,
+      file: file
+        .as_ref()
+        .map(|x| x.split(&['/', '\\'][..]).last().map(String::from))
+        .flatten(),
+      sources: vec![source
+        .as_ref()
+        .map(|x| get_relative_path(&file.unwrap_or_default(), x))
+        .unwrap_or_default()],
+      sources_content: include_content.and_then(|x| {
+        if x {
+          return Some(vec![self.original.to_owned()]);
+        } else {
+          return None;
+        }
+      }),
+      source_root,
+      names: self.stored_names.to_owned(),
+      mappings: map.get_decoded_mappings(),
+      x_google_ignoreList: if self.ignore_list {
+        Some(vec![SOURCE_INDEX])
+      } else {
+        None
+      },
+    })
   }
 }
 
