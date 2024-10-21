@@ -245,7 +245,7 @@ impl __internal_magic_string {
     if index >= _start && index <= _end {
       return Err(Error::from_reason(
         MsErrType::Range,
-        "Index must be in the range of Start and End",
+        "Cannot move a selection inside itself",
       ));
     }
 
@@ -302,11 +302,10 @@ impl __internal_magic_string {
         last.borrow_mut().next = Some(new_right);
       }
       None => {
-        let last = Rc::clone(&last);
         self.last_chunk.borrow_mut().next = Some(Rc::clone(&last));
         first.borrow_mut().previous = Some(Rc::clone(&self.last_chunk));
         last.borrow_mut().next = None;
-        self.last_chunk = last;
+        self.last_chunk = Rc::clone(&last);
       }
     }
 
@@ -404,13 +403,16 @@ impl __internal_magic_string {
 
     let first = self.start_index_chunk_map.get(&_start);
     let last = self.end_index_chunk_map.get(&_end);
-    let mut cur = first.and_then(|r| Some(r.to_owned()));
-
-    if first.is_some() && last.is_some() {
-      while cur.is_some() && cur.clone().unwrap().borrow().end <= _end {
-        let c = Rc::clone(&cur.unwrap());
-        c.borrow_mut().edit("", false, false);
-        cur = c.borrow().next.clone();
+    if last.is_some() {
+      if let Some(cur) = first.map(Rc::clone) {
+        let _ = Chunk::each_next(cur, |chunk| {
+          if chunk.borrow().end > _end {
+            Ok(true)
+          } else {
+            chunk.borrow_mut().edit("", false, false);
+            Ok(false)
+          }
+        });
       }
     }
     Ok(self)
@@ -466,6 +468,72 @@ impl __internal_magic_string {
     cloned.outro = self.outro.clone();
 
     cloned
+  }
+
+  pub fn slice(&self, start: i32, end: i32) -> Result<String> {
+    let (_start, _end) = _normalize_range(self.original.as_str(), start, end)?;
+    let mut s = String::new();
+    let mut chunk = Some(Rc::clone(&self.first_chunk));
+    while let Some(cur) = chunk.clone() {
+      if cur.borrow().start > _start || cur.borrow().end <= _start {
+        if cur.borrow().start < _end && cur.borrow().end >= _end {
+          return Ok(s);
+        }
+        chunk = cur.borrow().next.as_ref().map(Rc::clone);
+      } else {
+        break;
+      }
+    }
+    if let Some(cur) = chunk.clone() {
+      if cur.borrow().edited && cur.borrow().start != _start {
+        return Err(Error::from_reason(
+          MsErrType::Slice,
+          format!(
+            "Cannot use replaced character {} as slice start anchor.",
+            _start
+          )
+          .as_str(),
+        ));
+      }
+    }
+    let mut loop_idx = 0;
+    if let Some(cur) = chunk {
+      let _ = Chunk::each_next(cur, |c| {
+        if !c.borrow().intro.is_empty() && (loop_idx != 0 || c.borrow().start == _start) {
+          s.push_str(&c.borrow().intro);
+        }
+        let contains_end = c.borrow().start < _end && c.borrow().end >= _end;
+        if contains_end && c.borrow().edited && c.borrow().end != _end {
+          return Err(Error::from_reason(
+            MsErrType::Slice,
+            format!(
+              "Cannot use replaced character {} as slice end anchor.",
+              _end
+            )
+            .as_str(),
+          ));
+        }
+        let slice_start = if loop_idx == 0 {
+          _start - c.borrow().start
+        } else {
+          0
+        };
+        let slice_end = if contains_end {
+          (c.borrow().content.len()) as u32 + _end - c.borrow().end
+        } else {
+          c.borrow().content.len() as u32
+        };
+        s.push_str(&c.borrow().content.as_str()[slice_start as usize..slice_end as usize]);
+
+        if !c.borrow().outro.is_empty() && (!contains_end || c.borrow().end == _end) {
+          s.push_str(&c.borrow().outro);
+        }
+        loop_idx += 1;
+        return Ok(contains_end);
+      })?;
+    }
+
+    Ok(s)
   }
 
   pub fn snip(&mut self, start: i32, end: i32) -> Result<__internal_magic_string> {
@@ -717,14 +785,13 @@ impl __internal_magic_string {
 
 impl ToString for __internal_magic_string {
   fn to_string(&self) -> String {
-    // let chunk = self.first_chunk.borrow();
     let mut str = self.intro.clone();
-    let mut cur = Some(Rc::clone(&self.first_chunk));
-    while let Some(c) = cur {
-      let _cur = c.borrow().to_string();
-      str.push_str(_cur.as_str());
-      cur = c.borrow().next.clone();
-    }
+    let _ = Chunk::each_next(Rc::clone(&self.first_chunk), |chunk| {
+      str.push_str(chunk.borrow().intro.as_str());
+      str.push_str(chunk.borrow().content.as_str());
+      str.push_str(chunk.borrow().outro.as_str());
+      Ok(false)
+    });
     str.push_str(self.outro.as_str());
     str
   }

@@ -3,9 +3,9 @@ import MagicString from 'magic-string'
 
 const validate = handle => {
   const res = []
-    ;[RustMagicString, MagicString].map(Cons => {
-      res.push(handle(Cons))
-    })
+  ;[RustMagicString, MagicString].map(Cons => {
+    res.push(handle(Cons))
+  })
   expect(res[0]).toBe(res[1])
 }
 
@@ -147,12 +147,121 @@ describe('MagicString', () => {
   })
 
   describe('move', () => {
-    it('normal', () => {
+    it('moves content from the start', () => {
       validate(Cons => {
-        const s = new Cons('ABCDEFG')
-        s.prependLeft(4, '  B  ')
-        s.move(4, 6, 1)
-        s.move(2, 4, 5)
+        const s = new Cons('abcdefghijkl')
+        s.move(0, 3, 6)
+        return s.toString()
+      })
+    })
+
+    it('moves content to the start', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+        s.move(3, 6, 0)
+        return s.toString()
+      })
+    })
+
+    it('moves content from the end', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+        s.move(9, 12, 6)
+        return s.toString()
+      })
+    })
+
+    it('moves content to the end', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+
+        s.move(6, 9, 12)
+        return s.toString()
+      })
+    })
+
+    it('ignores redundant move', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+
+        s.prependRight(9, 'X')
+        s.move(9, 12, 6)
+        s.appendLeft(12, 'Y')
+        s.move(6, 9, 12) // this is redundant – [6,9] is already after [9,12]
+        return s.toString()
+      })
+    })
+
+    it('moves content to the middle', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+        s.move(3, 6, 9)
+        return s.toString()
+      })
+    })
+
+    it('handles multiple moves of the same snippet', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+
+        s.move(0, 3, 6)
+        s.move(0, 3, 9)
+        return s.toString()
+      })
+    })
+
+    it('handles moves of adjacent snippets', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+
+        s.move(0, 2, 6)
+        s.move(2, 4, 6)
+        return s.toString()
+      })
+    })
+
+    it('handles moves to same index', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+        s.move(0, 2, 6).move(3, 5, 6)
+        return s.toString()
+      })
+    })
+
+    it('refuses to move a selection to inside itself', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+        expect(() => s.move(3, 6, 3)).toThrow(
+          /Cannot move a selection inside itself/
+        )
+        expect(() => s.move(3, 6, 4)).toThrow(
+          /Cannot move a selection inside itself/
+        )
+        expect(() => s.move(3, 6, 6)).toThrow(
+          /Cannot move a selection inside itself/
+        )
+      })
+    })
+
+    it('allows edits of moved content', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+        s.move(3, 6, 9)
+        s.overwrite(3, 6, 'DEF')
+        return s.toString()
+      })
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+        s.move(3, 6, 9)
+        s.overwrite(4, 5, 'E')
+        return s.toString()
+      })
+    })
+
+    it('moves content inserted at end of range', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+        s.appendLeft(6, 'X').move(3, 6, 9)
         return s.toString()
       })
     })
@@ -280,6 +389,106 @@ describe('MagicString', () => {
         const snippet = s.snip(3, 9)
         snippet.overwrite(6, 9, 'GHI')
         return snippet.toString()
+      })
+    })
+  })
+
+  describe('slice', () => {
+    it('should return the generated content between the specified original characters', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+        expect(s.slice(3, 9)).toBe('defghi')
+        s.overwrite(4, 8, 'XX')
+        expect(s.slice(3, 9)).toBe('dXXi')
+        s.overwrite(2, 10, 'ZZ')
+        expect(s.slice(1, 11)).toBe('bZZk')
+        expect(s.slice(2, 10)).toBe('ZZ')
+        expect(() => s.slice(3, 9)).toThrow(
+          'Cannot use replaced character 3 as slice start anchor.'
+        )
+      })
+    })
+
+    it('defaults `end` to the original string length', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+        expect(s.slice(3)).toBe('defghijkl')
+      })
+    })
+
+    it('allows negative numbers as arguments', () => {
+      validate(Cons => {
+        const s = new Cons('abcdefghijkl')
+        expect(s.slice(-3)).toBe('jkl')
+        expect(s.slice(0, -3)).toBe('abcdefghi')
+      })
+    })
+
+    it('includes inserted characters, respecting insertion direction', () => {
+      validate(Cons => {
+        const s = new Cons('abefij')
+        s.prependRight(2, 'cd')
+        s.appendLeft(4, 'gh')
+        expect(s.slice()).toBe('abcdefghij')
+        expect(s.slice(1, 5)).toBe('bcdefghi')
+        expect(s.slice(2, 4)).toBe('cdefgh')
+        expect(s.slice(3, 4)).toBe('fgh')
+        expect(s.slice(0, 2)).toBe('ab')
+        expect(s.slice(0, 3)).toBe('abcde')
+        expect(s.slice(4, 6)).toBe('ij')
+        expect(s.slice(3, 6)).toBe('fghij')
+      })
+    })
+
+    it('supports characters moved outward', () => {
+      validate(Cons => {
+        const s = new Cons('abcdEFghIJklmn')
+        s.move(4, 6, 2)
+        s.move(8, 10, 12)
+
+        expect(s.toString()).toBe('abEFcdghklIJmn')
+        expect(s.slice(1, -1)).toBe('bEFcdghklIJm')
+        expect(s.slice(2, -2)).toBe('cdghkl')
+        expect(s.slice(3, -3)).toBe('dghk')
+        expect(s.slice(4, -4)).toBe('EFcdghklIJ')
+        expect(s.slice(5, -5)).toBe('FcdghklI')
+        expect(s.slice(6, -6)).toBe('gh')
+      })
+    })
+
+    it('supports characters moved opposing', () => {
+      validate(Cons => {
+        const s = new Cons('abCDefghIJkl')
+        s.move(2, 4, 8)
+        s.move(8, 10, 4)
+        expect(s.slice(1, -1)).toBe('bIJefghCDk')
+        expect(s.slice(2, -2)).toBe('')
+        expect(s.slice(3, -3)).toBe('')
+        expect(s.slice(-3, 3)).toBe('JefghC')
+        expect(s.slice(4, -4)).toBe('efgh')
+        expect(s.slice(0, 3)).toBe('abIJefghC')
+        expect(s.slice(3)).toBe('Dkl')
+        expect(s.slice(0, -3)).toBe('abI')
+        expect(s.slice(-3)).toBe('JefghCDkl')
+      })
+    })
+
+    it('errors if replaced characters are used as slice anchors', () => {
+      validate(Cons => {
+        const s = new Cons('abcdef')
+        s.overwrite(2, 4, 'CD')
+        expect(() => s.slice(2, 3)).toThrow(/slice end anchor/)
+        expect(() => s.slice(3, 4)).toThrow(/slice start anchor/)
+        expect(() => s.slice(3, 5)).toThrow(/slice start anchor/)
+        expect(s.slice(1, 5)).toBe('bCDe')
+      })
+    })
+
+    it('does not error if slice is after removed characters', () => {
+      validate(Cons => {
+        const s = new Cons('abcdef')
+        s.remove(0, 2)
+        expect(s.slice(2, 4)).toBe('cd')
       })
     })
   })
@@ -419,7 +628,7 @@ describe('MagicString', () => {
             rule: '1',
             global: true
           },
-          () => { }
+          () => {}
         )
       ).toThrow('`replacement` argument do not supports RegExp replacerFn now')
     })
@@ -595,7 +804,7 @@ describe('MagicString', () => {
             rule: '1',
             global: true
           },
-          () => { }
+          () => {}
         )
       ).toThrow(
         'TypeError: `replacement` argument do not supports RegExp replacerFn now'

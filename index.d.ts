@@ -58,6 +58,10 @@ export declare class MagicString {
   hasChanged(): boolean
   clone(): MagicString
   snip(start: number, end: number): MagicString
+  slice(
+    start?: number | undefined | null,
+    end?: number | undefined | null
+  ): string
   reset(start: number, end: number): this
   replace(
     searchValue: string | JsRegExp,

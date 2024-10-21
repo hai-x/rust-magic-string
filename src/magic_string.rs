@@ -181,6 +181,14 @@ impl MagicString {
   }
 
   #[napi]
+  pub fn slice(&mut self, start: Option<i32>, end: Option<i32>) -> Result<String> {
+    let _start = start.unwrap_or(0);
+    let _end = end.unwrap_or(self.0.original.len() as i32);
+    let ms = self.0.slice(_start, _end)?;
+    Ok(ms)
+  }
+
+  #[napi]
   pub fn reset(&mut self, start: i32, end: i32) -> Result<&Self> {
     self.0.reset(start, end)?;
     Ok(self)

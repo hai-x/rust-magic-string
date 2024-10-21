@@ -240,9 +240,3 @@ impl Chunk {
     Ok(())
   }
 }
-
-impl ToString for Chunk {
-  fn to_string(&self) -> String {
-    format!("{}{}{}", self.intro, self.content, self.outro)
-  }
-}

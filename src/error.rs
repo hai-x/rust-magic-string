@@ -70,6 +70,7 @@ pub enum MsErrType {
   IO,
   Vlq,
   StringFromUTF8,
+  Slice,
 }
 
 impl From<Error> for napi::Error {
@@ -105,6 +106,9 @@ impl From<Error> for napi::Error {
       }
       MsErrType::StringFromUTF8 => {
         reason.push_str("String from utf-8 error");
+      }
+      MsErrType::Slice => {
+        reason.push_str("Slice error");
       }
     }
     reason.push_str(": ");
