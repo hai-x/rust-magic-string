@@ -8,6 +8,7 @@ extern crate napi_derive;
 #[macro_use]
 extern crate serde_derive;
 
+pub mod bit_set;
 pub mod error;
 pub mod internal_magic_string;
 pub mod locator;

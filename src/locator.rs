@@ -10,7 +10,7 @@ impl Locator {
 
     for line in original_lines {
       line_offsets.push(pos);
-      pos += line.len() + 1; // +1 for the newline character
+      pos += line.chars().count() + 1;
     }
 
     Locator { line_offsets }

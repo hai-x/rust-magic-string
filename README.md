@@ -5,16 +5,16 @@ Inspired by [magic-string-rs](https://github.com/h-a-n-a/magic-string-rs).
 
 ## RoadMap
 
-### MagicString
+### Implemented
 
-- [ ] addSourcemapLocation
+- [x] addSourcemapLocation
 - [x] append
 - [x] appendLeft
 - [x] appendRight
 - [x] clone
 - [x] generateDecodedMap
 - [x] generateMap
-- [ ] indent
+- [x] indent
 - [x] insert
 - [x] insertLeft
 - [x] insertRight
@@ -26,7 +26,7 @@ Inspired by [magic-string-rs](https://github.com/h-a-n-a/magic-string-rs).
 - [x] prependRight
 - [x] remove
 - [x] reset
-- [ ] slice
+- [x] slice
 - [x] snip
 - [x] toString
 - [x] isEmpty
@@ -37,3 +37,15 @@ Inspired by [magic-string-rs](https://github.com/h-a-n-a/magic-string-rs).
 - [x] hasChanged
 - [x] replace
 - [x] replaceAll
+
+### To be improved
+
+1. Javascript Regexp -> Rust Regexp
+
+- [] replace
+- [] replaceAll
+
+2. performance
+
+- [] generateDecodedMap
+- [] generateMap

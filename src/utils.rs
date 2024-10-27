@@ -76,3 +76,63 @@ pub fn get_relative_path(from: &str, to: &str) -> String {
 
   relative_path.join("/")
 }
+
+pub fn guess_indent(code: &str) -> Result<String> {
+  let lines: Vec<&str> = code.lines().collect();
+
+  let tabbed: Vec<&str> = lines
+    .iter()
+    .filter(|line| line.starts_with('\t'))
+    .cloned()
+    .collect();
+  let spaced: Vec<&str> = lines
+    .iter()
+    .filter(|line| line.starts_with("  "))
+    .cloned()
+    .collect();
+
+  if tabbed.len() >= spaced.len() || (tabbed.is_empty() && spaced.is_empty()) {
+    return Ok("\t".to_string());
+  }
+
+  let min_spaces = spaced.iter().fold(usize::MAX, |min_spaces, line| {
+    let num_spaces = line.chars().take_while(|&c| c == ' ').count();
+    min_spaces.min(num_spaces)
+  });
+
+  Ok(" ".repeat(min_spaces))
+}
+
+pub fn safe_split_at(s: &str, index: usize) -> Option<(&str, &str)> {
+  if index > s.chars().count() {
+    return None;
+  }
+
+  let byte_index = s
+    .char_indices()
+    .nth(index)
+    .map(|(byte_index, _)| byte_index)?;
+
+  Some(s.split_at(byte_index))
+}
+
+pub fn find_char_index_of_substring(s: &str, substring: &str) -> Option<usize> {
+  let mut char_index = 0;
+  let mut byte_index = 0;
+  let substring_length = substring.chars().count();
+
+  for (_, ch) in s.chars().enumerate() {
+    if s[byte_index..]
+      .chars()
+      .take(substring_length)
+      .collect::<String>()
+      == substring
+    {
+      return Some(char_index);
+    }
+    char_index += 1;
+    byte_index += ch.len_utf8()
+  }
+
+  None
+}

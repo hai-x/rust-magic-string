@@ -2,6 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::error::{Error, MsErrType};
 use crate::result::Result;
+use crate::utils::safe_split_at;
 use regex::Regex;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -157,12 +158,24 @@ impl Chunk {
     let mut cur_chunk = chunk.borrow_mut();
 
     if index < cur_chunk.start {
-      return Err(Error::new(MsErrType::Range));
+      return Err(Error::from_reason(
+        MsErrType::Range,
+        "index larger than chunk start",
+      ));
     }
 
     // split str
-    let slice_idx = (index - cur_chunk.start) as usize;
-    let (original_before, origin_after) = cur_chunk.original.split_at(slice_idx);
+    let mid_index = (index - cur_chunk.start) as usize;
+    let split_res = safe_split_at(cur_chunk.original.as_str(), mid_index);
+
+    if split_res.is_none() {
+      return Err(Error::from_reason(
+        MsErrType::Range,
+        "index larger than str count",
+      ));
+    }
+
+    let (original_before, origin_after) = split_res.unwrap();
 
     // create new chunk
     let new_chunk: Rc<RefCell<Chunk>> =

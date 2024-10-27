@@ -4,6 +4,7 @@
  */
 use std::{cell::RefCell, rc::Rc};
 
+use crate::bit_set::BitSet;
 use crate::internal_magic_string::chunk::Chunk;
 use crate::result::Result;
 
@@ -14,21 +15,22 @@ pub type Mappings = Vec<Line>;
 
 pub static SOURCE_INDEX: u8 = 0;
 
-#[derive(Debug)]
 pub struct MappingsFacade {
   pub raw: Mappings,
   generated_code_line: u32,
   generated_code_column: u32,
   hires: bool,
+  sourcemap_locations: BitSet,
 }
 
 impl MappingsFacade {
-  pub fn new(hires: bool) -> Self {
+  pub fn new(hires: bool, sourcemap_locations: &BitSet) -> Self {
     Self {
       generated_code_line: 0,
       generated_code_column: 0,
       hires,
       raw: vec![],
+      sourcemap_locations: BitSet::new(Some(sourcemap_locations)),
     }
   }
 
@@ -77,8 +79,9 @@ impl MappingsFacade {
       let mut o_line = o_line;
       let mut o_column = o_column;
       let mut first = true;
-      for char in chunk.borrow().original.chars() {
-        if self.hires || first {
+      for (idx, char) in chunk.borrow().original.chars().enumerate() {
+        // TODO:logic order
+        if self.hires || first || self.sourcemap_locations.has(idx) {
           let seg: Seg = vec![
             self.generated_code_column.into(),
             SOURCE_INDEX.into(),

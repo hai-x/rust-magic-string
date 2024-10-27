@@ -26,6 +26,7 @@
   "license": "MIT",
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4",
+    "@napi-rs/magic-string": "^0.3.4",
     "@types/jest": "^29.5.12",
     "benchmark": "^2.1.4",
     "bumpp": "^9.5.2",

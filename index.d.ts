@@ -20,15 +20,29 @@ export interface MagicStringOptions {
   indentExclusionRanges?: Array<number>
   ignoreList?: boolean
 }
+export interface IndentOptions {
+  exclude?: Array<Array<number>>
+  indentStart?: boolean
+}
 export interface JsRegExp {
   global?: boolean
   rule: string
 }
 export declare class MagicString {
   constructor(str: string, options?: MagicStringOptions | undefined | null)
-  insert(): void
+  addSourcemapLocation(index: number): this
   append(input: string): this
   appendLeft(index: number, input: string): this
+  clone(): MagicString
+  generateMap(options?: GenerateMapOptions | undefined | null): SourceMap
+  generateDecodedMap(
+    options?: GenerateMapOptions | undefined | null
+  ): DecodedMap
+  indent(
+    indentStr?: string | undefined | null,
+    options?: IndentOptions | undefined | null
+  ): this
+  insert(): void
   insertLeft(index: number, input: string): this
   appendRight(index: number, input: string): this
   prepend(input: string): this
@@ -56,7 +70,6 @@ export declare class MagicString {
   isEmpty(): boolean
   toString(): string
   hasChanged(): boolean
-  clone(): MagicString
   snip(start: number, end: number): MagicString
   slice(
     start?: number | undefined | null,
@@ -71,10 +84,6 @@ export declare class MagicString {
     searchValue: string | JsRegExp,
     replacement: string | ((...args: any[]) => any)
   ): this
-  generateMap(options?: GenerateMapOptions | undefined | null): SourceMap
-  generateDecodedMap(
-    options?: GenerateMapOptions | undefined | null
-  ): DecodedMap
 }
 export declare class DecodedMap {
   version: number

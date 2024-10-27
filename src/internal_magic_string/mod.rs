@@ -1,6 +1,7 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc, vec};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, str, vec};
 
 use crate::{
+  bit_set::BitSet,
   error::{Error, MsErrType},
   locator::Locator,
   result::Result,
@@ -8,7 +9,10 @@ use crate::{
     mappings::{MappingsFacade, SOURCE_INDEX},
     DecodedMap, SourceMap, SOURCEMAP_VERSION,
   },
-  utils::{_normalize_range, get_relative_path, match_all, slice_string},
+  utils::{
+    _normalize_range, find_char_index_of_substring, get_relative_path, guess_indent, match_all,
+    slice_string,
+  },
 };
 
 pub mod chunk;
@@ -28,8 +32,8 @@ pub struct GenerateMapOptions {
 impl Default for GenerateMapOptions {
   fn default() -> Self {
     Self {
-      file: Some(String::default()),
-      source_root: Some(String::default()),
+      file: None,
+      source_root: None,
       source: Some(String::default()),
       include_content: Some(false),
       hires: Some(false),
@@ -73,12 +77,26 @@ impl Default for MagicStringOptions {
   }
 }
 
+#[napi(object)]
+pub struct IndentOptions {
+  pub exclude: Option<Vec<Vec<u32>>>,
+  pub indent_start: Option<bool>,
+}
+
+impl Default for IndentOptions {
+  fn default() -> Self {
+    Self {
+      exclude: None,
+      indent_start: None,
+    }
+  }
+}
+
 #[allow(non_camel_case_types)]
 pub struct __internal_magic_string {
   pub original: String,
   pub intro: String,
   pub outro: String,
-
   pub start_index_chunk_map: HashMap<u32, Rc<RefCell<Chunk>>>,
   pub end_index_chunk_map: HashMap<u32, Rc<RefCell<Chunk>>>,
 
@@ -87,7 +105,8 @@ pub struct __internal_magic_string {
   last_chunk: Rc<RefCell<Chunk>>,
   stored_names: Vec<String>,
   ignore_list: bool,
-
+  sourcemap_locations: BitSet,
+  indent_str: Option<String>,
   _locator: Locator,
   _raw_options: MagicStringOptions,
 }
@@ -109,22 +128,22 @@ impl __internal_magic_string {
       last_searched_chunk: Rc::clone(&chunk),
       first_chunk: Rc::clone(&chunk),
       last_chunk: Rc::clone(&chunk),
-
       stored_names: vec![],
-
       ignore_list: options.ignore_list.unwrap_or_default(),
+      sourcemap_locations: BitSet::new(None),
+      indent_str: None,
       _locator: Locator::new(str),
       _raw_options: options,
     }
   }
 
-  pub fn append(&mut self, str: &str) -> Result<&mut Self> {
-    self.outro = format!("{}{}", self.outro, str);
-    Ok(self)
+  pub fn add_sourcemap_location(&mut self, index: u32) -> &Self {
+    self.sourcemap_locations.add(index as usize);
+    self
   }
 
-  pub fn prepend(&mut self, str: &str) -> Result<&mut Self> {
-    self.intro = format!("{}{}", str, self.intro);
+  pub fn append(&mut self, str: &str) -> Result<&mut Self> {
+    self.outro = format!("{}{}", self.outro, str);
     Ok(self)
   }
 
@@ -150,93 +169,117 @@ impl __internal_magic_string {
     Ok(self)
   }
 
-  pub fn prepend_left(&mut self, index: u32, content: &str) -> Result<&mut Self> {
-    self._split(index)?;
-    if let Some(chunk) = self.end_index_chunk_map.get(&index) {
-      let mut chunk: std::cell::RefMut<'_, Chunk> = chunk.borrow_mut();
-      chunk.prepend_left(content);
-    } else {
-      self.intro.push_str(content);
-    };
-    Ok(self)
-  }
+  pub fn clone(&self) -> __internal_magic_string {
+    let mut cloned =
+      __internal_magic_string::new(self.original.as_str(), Some(self._raw_options.clone()));
+    cloned.first_chunk = Rc::new(RefCell::new(self.first_chunk.borrow().self_clone()));
+    cloned.last_chunk = Rc::clone(&cloned.first_chunk);
+    cloned.last_searched_chunk = Rc::clone(&cloned.first_chunk);
 
-  pub fn prepend_right(&mut self, index: u32, content: &str) -> Result<&mut Self> {
-    self._split(index)?;
-    if let Some(chunk) = self.start_index_chunk_map.get(&index) {
-      let mut chunk: std::cell::RefMut<'_, Chunk> = chunk.borrow_mut();
-      chunk.prepend_right(content);
-    } else {
-      self.intro.push_str(content);
-    };
-    Ok(self)
-  }
+    let mut original_chunk = Some(Rc::clone(&self.first_chunk));
+    let mut cloned_chunk = Some(Rc::clone(&cloned.first_chunk));
 
-  pub fn is_empty(&self) -> bool {
-    self.to_string().trim().is_empty()
-  }
+    while let Some(o) = original_chunk {
+      if let Some(c) = cloned_chunk {
+        // update `cloned chunk`
+        cloned
+          .start_index_chunk_map
+          .insert(c.borrow().start, Rc::clone(&c));
+        cloned
+          .end_index_chunk_map
+          .insert(c.borrow().end, Rc::clone(&c));
 
-  pub fn trim(&mut self, char_type: Option<&str>) {
-    self.trim_start(char_type).trim_end(char_type);
-  }
+        // update `next cloned chunk`
+        let original_next = o.borrow().next.clone();
+        let cloned_next = if original_next.is_some() {
+          let mut cloned_next = original_next.unwrap().borrow().self_clone();
+          cloned_next.previous = Some(c.clone());
+          Some(Rc::new(RefCell::new(cloned_next)))
+        } else {
+          None
+        };
 
-  pub fn trim_start_aborted(&mut self, char_type: Option<&str>) -> bool {
-    let pat = "^".to_owned() + char_type.unwrap_or("\\s") + "+";
-    let reg = Regex::new(pat.as_str()).unwrap();
-    self.intro = reg.replace(&self.intro, "").to_string();
-    if !self.intro.is_empty() {
-      return true;
-    }
-    let mut cur = Some(Rc::clone(&self.first_chunk));
-
-    while let Some(c) = cur {
-      let mut _cur = c.borrow_mut();
-      // let end = _cur.end;
-      let aborted = _cur.trim_start(&reg);
-      if aborted {
-        return true;
+        // connect `cloned chunk` and `next cloned chunk`
+        cloned_chunk = if cloned_next.is_some() {
+          c.borrow_mut().next = cloned_next.clone();
+          cloned.last_chunk = Rc::clone(&cloned_next.clone().unwrap());
+          cloned_next.clone()
+        } else {
+          None
+        }
       }
-      cur = _cur.next.clone();
+      original_chunk = o.borrow().next.clone();
     }
 
-    false
+    cloned.intro = self.intro.clone();
+    cloned.outro = self.outro.clone();
+    cloned.sourcemap_locations = self.sourcemap_locations.clone();
+    cloned
   }
 
-  pub fn trim_start(&mut self, char_type: Option<&str>) -> &mut Self {
-    self.trim_start_aborted(char_type);
-    self
+  pub fn generate_map(&self, options: Option<GenerateMapOptions>) -> Result<SourceMap> {
+    let decoded_map = self.generate_decoded_map(options)?;
+    SourceMap::from_decoded_map(decoded_map)
   }
 
-  pub fn trim_end_aborted(&mut self, char_type: Option<&str>) -> bool {
-    let pat = char_type.unwrap_or("\\s").to_owned() + "+$";
-    let reg = Regex::new(pat.as_str()).unwrap();
-    self.outro = reg.replace(&self.outro, "").to_string();
-    if !self.outro.is_empty() {
-      return true;
-    }
-    let mut cur = Some(Rc::clone(&self.last_chunk));
+  pub fn generate_decoded_map(&self, options: Option<GenerateMapOptions>) -> Result<DecodedMap> {
+    let GenerateMapOptions {
+      file,
+      source,
+      hires,
+      include_content,
+      source_root,
+    } = options.unwrap_or_default();
 
-    while let Some(c) = cur {
-      let mut _cur = c.borrow_mut();
-      // let end = _cur.end;
-      let aborted = _cur.trim_end(&reg);
-      if aborted {
-        return true;
+    let hires = hires.unwrap_or_default();
+
+    let mut map = MappingsFacade::new(hires, &self.sourcemap_locations);
+
+    map.advance(self.intro.as_str());
+
+    Chunk::each_next(Rc::clone(&self.first_chunk), |chunk| {
+      let loc = self._locator.locate(chunk.borrow().start as usize);
+      if let Some((o_line, o_column)) = loc {
+        map.add_chunk(
+          Rc::clone(&chunk),
+          (o_line as u32, o_column as u32),
+          self
+            .stored_names
+            .binary_search(&chunk.borrow().original)
+            .unwrap_or_else(|_| usize::MAX),
+        );
       }
-      cur = _cur.previous.as_ref().map(Rc::clone);
-    }
+      Ok(false)
+    })?;
 
-    false
-  }
+    map.advance(self.outro.as_str());
 
-  pub fn trim_end(&mut self, char_type: Option<&str>) -> &mut Self {
-    self.trim_end_aborted(char_type);
-    self
-  }
-
-  pub fn trim_lines(&mut self) -> &mut Self {
-    self.trim(Some("[\\r\\n]"));
-    self
+    Ok(DecodedMap {
+      version: SOURCEMAP_VERSION,
+      file: file
+        .as_ref()
+        .map(|x| x.split(&['/', '\\'][..]).last().map(String::from))
+        .flatten(),
+      sources: vec![source
+        .as_ref()
+        .map(|x| get_relative_path(&file.unwrap_or_default(), x))
+        .unwrap_or_default()],
+      sources_content: include_content.and_then(|x| {
+        if x {
+          return Some(vec![self.original.to_owned()]);
+        } else {
+          return None;
+        }
+      }),
+      source_root,
+      names: self.stored_names.to_owned(),
+      mappings: map.get_decoded_mappings(),
+      x_google_ignoreList: if self.ignore_list {
+        Some(vec![SOURCE_INDEX])
+      } else {
+        None
+      },
+    })
   }
 
   pub fn _move(&mut self, start: i32, end: i32, index: u32) -> Result<&mut Self> {
@@ -391,6 +434,33 @@ impl __internal_magic_string {
     Ok(self)
   }
 
+  pub fn prepend(&mut self, str: &str) -> Result<&mut Self> {
+    self.intro = format!("{}{}", str, self.intro);
+    Ok(self)
+  }
+
+  pub fn prepend_left(&mut self, index: u32, content: &str) -> Result<&mut Self> {
+    self._split(index)?;
+    if let Some(chunk) = self.end_index_chunk_map.get(&index) {
+      let mut chunk: std::cell::RefMut<'_, Chunk> = chunk.borrow_mut();
+      chunk.prepend_left(content);
+    } else {
+      self.intro.push_str(content);
+    };
+    Ok(self)
+  }
+
+  pub fn prepend_right(&mut self, index: u32, content: &str) -> Result<&mut Self> {
+    self._split(index)?;
+    if let Some(chunk) = self.start_index_chunk_map.get(&index) {
+      let mut chunk: std::cell::RefMut<'_, Chunk> = chunk.borrow_mut();
+      chunk.prepend_right(content);
+    } else {
+      self.intro.push_str(content);
+    };
+    Ok(self)
+  }
+
   pub fn remove(&mut self, start: i32, end: i32) -> Result<&Self> {
     let (_start, _end) = _normalize_range(self.original.as_str(), start, end)?;
 
@@ -418,56 +488,26 @@ impl __internal_magic_string {
     Ok(self)
   }
 
-  pub fn has_changed(&self) -> bool {
-    self.original != self.to_string()
-  }
-
-  pub fn clone(&self) -> __internal_magic_string {
-    let mut cloned =
-      __internal_magic_string::new(self.original.as_str(), Some(self._raw_options.clone()));
-    cloned.first_chunk = Rc::new(RefCell::new(self.first_chunk.borrow().self_clone()));
-    cloned.last_chunk = Rc::clone(&cloned.first_chunk);
-    cloned.last_searched_chunk = Rc::clone(&cloned.first_chunk);
-
-    let mut original_chunk = Some(Rc::clone(&self.first_chunk));
-    let mut cloned_chunk = Some(Rc::clone(&cloned.first_chunk));
-
-    while let Some(o) = original_chunk {
-      if let Some(c) = cloned_chunk {
-        // update `cloned chunk`
-        cloned
-          .start_index_chunk_map
-          .insert(c.borrow().start, Rc::clone(&c));
-        cloned
-          .end_index_chunk_map
-          .insert(c.borrow().end, Rc::clone(&c));
-
-        // update `next cloned chunk`
-        let original_next = o.borrow().next.clone();
-        let cloned_next = if original_next.is_some() {
-          let mut cloned_next = original_next.unwrap().borrow().self_clone();
-          cloned_next.previous = Some(c.clone());
-          Some(Rc::new(RefCell::new(cloned_next)))
-        } else {
-          None
-        };
-
-        // connect `cloned chunk` and `next cloned chunk`
-        cloned_chunk = if cloned_next.is_some() {
-          c.borrow_mut().next = cloned_next.clone();
-          cloned.last_chunk = Rc::clone(&cloned_next.clone().unwrap());
-          cloned_next.clone()
-        } else {
-          None
-        }
-      }
-      original_chunk = o.borrow().next.clone();
+  pub fn reset(&mut self, start: i32, end: i32) -> Result<&Self> {
+    let (_start, _end) = _normalize_range(self.original.as_str(), start, end)?;
+    if _start == _end {
+      return Ok(self);
     }
-
-    cloned.intro = self.intro.clone();
-    cloned.outro = self.outro.clone();
-
-    cloned
+    self._split(_start)?;
+    self._split(_end)?;
+    let mut first = self.start_index_chunk_map.get(&_start).map(Rc::clone);
+    while let Some(c) = first {
+      c.borrow_mut().reset();
+      first = if _end > c.borrow().end {
+        self
+          .start_index_chunk_map
+          .get(&c.borrow().end)
+          .map(Rc::clone)
+      } else {
+        None
+      }
+    }
+    Ok(self)
   }
 
   pub fn slice(&self, start: i32, end: i32) -> Result<String> {
@@ -543,26 +583,190 @@ impl __internal_magic_string {
     Ok(cloned)
   }
 
-  pub fn reset(&mut self, start: i32, end: i32) -> Result<&Self> {
-    let (_start, _end) = _normalize_range(self.original.as_str(), start, end)?;
-    if _start == _end {
-      return Ok(self);
+  pub fn indent(
+    &mut self,
+    indent_str: Option<String>,
+    options: Option<IndentOptions>,
+  ) -> Result<&Self> {
+    let options = options.unwrap_or_default();
+    let mut indent_str = indent_str.map(|s| s.to_string());
+
+    if indent_str.is_none() {
+      self._ensure_indent_str()?;
+      indent_str = self.indent_str.clone();
     }
-    self._split(_start)?;
-    self._split(_end)?;
-    let mut first = self.start_index_chunk_map.get(&_start).map(Rc::clone);
-    while let Some(c) = first {
-      c.borrow_mut().reset();
-      first = if _end > c.borrow().end {
-        self
-          .start_index_chunk_map
-          .get(&c.borrow().end)
-          .map(Rc::clone)
-      } else {
-        None
+
+    if let Some(ref s) = indent_str {
+      if s.is_empty() {
+        return Ok(self);
       }
     }
+
+    let indent_str = indent_str.unwrap();
+
+    let exclusions = options.exclude;
+    let mut is_excluded_map = HashMap::new();
+
+    if let Some(exclusions) = exclusions {
+      for exclusion in exclusions {
+        let start = exclusion[0];
+        let end = exclusion[1];
+        for i in start..end {
+          is_excluded_map.insert(i, true);
+        }
+      }
+    }
+
+    let mut should_indent_next_character = if let Some(indent_start) = options.indent_start {
+      indent_start != false
+    } else {
+      true
+    };
+
+    let re = Regex::new(r"(?m)^[^\r\n]").unwrap();
+
+    self.intro = re
+      .replace_all(&self.intro, |caps: &regex::Captures| {
+        if should_indent_next_character {
+          format!("{}{}", indent_str, &caps[0])
+        } else {
+          should_indent_next_character = true;
+          caps[0].to_string()
+        }
+      })
+      .into_owned();
+
+    let mut char_index = 0;
+    let _ = Chunk::each_next(Rc::clone(&self.first_chunk), |chunk| {
+      let content = chunk.borrow().content.clone();
+      if chunk.borrow().is_edited() {
+        let is_excluded = is_excluded_map.get(&char_index).copied().unwrap_or(false);
+        if !is_excluded {
+          chunk.borrow_mut().content = re
+            .replace_all(&content, |caps: &regex::Captures| {
+              if should_indent_next_character {
+                format!("{}{}", indent_str, &caps[0])
+              } else {
+                should_indent_next_character = true;
+                caps[0].to_string()
+              }
+            })
+            .into_owned();
+          if !chunk.borrow().content.is_empty() {
+            should_indent_next_character =
+              chunk.borrow().content.chars().last().unwrap_or_default() == '\n'
+          }
+        }
+      } else {
+        char_index = chunk.borrow().start;
+        while char_index < chunk.borrow().end {
+          let is_excluded = is_excluded_map.get(&char_index).copied().unwrap_or(false);
+          if !is_excluded {
+            if let Some(char) = self.original.chars().nth(char_index as usize) {
+              if char == '\n' {
+                should_indent_next_character = true;
+              } else if char != '\r' && should_indent_next_character {
+                should_indent_next_character = false;
+                if char_index == chunk.borrow().start {
+                  chunk.borrow_mut().prepend_right(&indent_str);
+                } else {
+                  self._split(char_index)?;
+                  if let Some(next) = &chunk.borrow().next {
+                    next.borrow_mut().prepend_right(&indent_str);
+                  }
+                }
+              }
+            }
+          }
+          char_index += 1;
+        }
+      }
+      Ok(false)
+    });
+
+    self.outro = re
+      .replace_all(&self.outro, |caps: &regex::Captures| {
+        if should_indent_next_character {
+          format!("{}{}", indent_str, &caps[0])
+        } else {
+          should_indent_next_character = true;
+          caps[0].to_string()
+        }
+      })
+      .into_owned();
+
     Ok(self)
+  }
+
+  pub fn is_empty(&self) -> bool {
+    self.to_string().trim().is_empty()
+  }
+
+  pub fn trim(&mut self, char_type: Option<&str>) {
+    self.trim_start(char_type).trim_end(char_type);
+  }
+
+  pub fn trim_start_aborted(&mut self, char_type: Option<&str>) -> bool {
+    let pat = "^".to_owned() + char_type.unwrap_or("\\s") + "+";
+    let reg = Regex::new(pat.as_str()).unwrap();
+    self.intro = reg.replace(&self.intro, "").to_string();
+    if !self.intro.is_empty() {
+      return true;
+    }
+    let mut cur = Some(Rc::clone(&self.first_chunk));
+
+    while let Some(c) = cur {
+      let mut _cur = c.borrow_mut();
+      // let end = _cur.end;
+      let aborted = _cur.trim_start(&reg);
+      if aborted {
+        return true;
+      }
+      cur = _cur.next.clone();
+    }
+
+    false
+  }
+
+  pub fn trim_start(&mut self, char_type: Option<&str>) -> &mut Self {
+    self.trim_start_aborted(char_type);
+    self
+  }
+
+  pub fn trim_end_aborted(&mut self, char_type: Option<&str>) -> bool {
+    let pat = char_type.unwrap_or("\\s").to_owned() + "+$";
+    let reg = Regex::new(pat.as_str()).unwrap();
+    self.outro = reg.replace(&self.outro, "").to_string();
+    if !self.outro.is_empty() {
+      return true;
+    }
+    let mut cur = Some(Rc::clone(&self.last_chunk));
+
+    while let Some(c) = cur {
+      let mut _cur = c.borrow_mut();
+      // let end = _cur.end;
+      let aborted = _cur.trim_end(&reg);
+      if aborted {
+        return true;
+      }
+      cur = _cur.previous.as_ref().map(Rc::clone);
+    }
+
+    false
+  }
+
+  pub fn trim_end(&mut self, char_type: Option<&str>) -> &mut Self {
+    self.trim_end_aborted(char_type);
+    self
+  }
+
+  pub fn trim_lines(&mut self) -> &mut Self {
+    self.trim(Some("[\\r\\n]"));
+    self
+  }
+
+  pub fn has_changed(&self) -> bool {
+    self.original != self.to_string()
   }
 
   pub fn _replace_regexp(
@@ -613,12 +817,12 @@ impl __internal_magic_string {
   }
 
   pub fn _replace_string(&mut self, search_value: &str, replacement: &str) -> Result<&Self> {
-    let start = self.original.find(search_value);
+    let start = find_char_index_of_substring(&self.original, search_value);
 
     if let Some(start) = start {
       self.overwrite(
         start as i32,
-        (start + search_value.len()) as i32,
+        (start + search_value.chars().count()) as i32,
         replacement,
         None,
       )?;
@@ -628,20 +832,27 @@ impl __internal_magic_string {
   }
 
   pub fn _replace_all_string(&mut self, search_value: &str, replacement: &str) -> Result<&Self> {
-    let mut start = self.original.find(search_value);
+    let mut start = find_char_index_of_substring(&self.original, search_value);
     let mut offset: usize = 0;
     while let Some(_start) = start {
       let _start = _start + offset;
-      offset = _start + search_value.len();
+      offset = _start + search_value.chars().count();
       self.overwrite(_start as i32, offset as i32, replacement, None)?;
       start = if offset <= self.original.len() {
-        self.original[offset..].find(search_value)
+        find_char_index_of_substring(&self.original[offset..], search_value)
       } else {
         None
       }
     }
 
     Ok(self)
+  }
+
+  fn _ensure_indent_str(&mut self) -> Result<()> {
+    if self.indent_str.is_none() {
+      self.indent_str = Some(guess_indent(&self.original)?);
+    }
+    Ok(())
   }
 
   fn _split(&mut self, index: u32) -> Result<()> {
@@ -715,71 +926,6 @@ impl __internal_magic_string {
       self.last_chunk = new_chunk
     }
     Ok(())
-  }
-
-  pub fn generate_map(&self, options: Option<GenerateMapOptions>) -> Result<SourceMap> {
-    let decoded_map = self.generate_decoded_map(options)?;
-    SourceMap::from_decoded_map(decoded_map)
-  }
-
-  pub fn generate_decoded_map(&self, options: Option<GenerateMapOptions>) -> Result<DecodedMap> {
-    let GenerateMapOptions {
-      file,
-      source,
-      hires,
-      include_content,
-      source_root,
-    } = options.unwrap_or_default();
-
-    let hires = hires.unwrap_or_default();
-
-    let mut map = MappingsFacade::new(hires);
-
-    map.advance(self.intro.as_str());
-
-    Chunk::each_next(Rc::clone(&self.first_chunk), |chunk| {
-      let loc = self._locator.locate(chunk.borrow().start as usize);
-      if let Some((o_line, o_column)) = loc {
-        map.add_chunk(
-          Rc::clone(&chunk),
-          (o_line as u32, o_column as u32),
-          self
-            .stored_names
-            .binary_search(&chunk.borrow().original)
-            .unwrap_or_else(|_| usize::MAX),
-        );
-      }
-      Ok(false)
-    })?;
-
-    map.advance(self.outro.as_str());
-
-    Ok(DecodedMap {
-      version: SOURCEMAP_VERSION,
-      file: file
-        .as_ref()
-        .map(|x| x.split(&['/', '\\'][..]).last().map(String::from))
-        .flatten(),
-      sources: vec![source
-        .as_ref()
-        .map(|x| get_relative_path(&file.unwrap_or_default(), x))
-        .unwrap_or_default()],
-      sources_content: include_content.and_then(|x| {
-        if x {
-          return Some(vec![self.original.to_owned()]);
-        } else {
-          return None;
-        }
-      }),
-      source_root,
-      names: self.stored_names.to_owned(),
-      mappings: map.get_decoded_mappings(),
-      x_google_ignoreList: if self.ignore_list {
-        Some(vec![SOURCE_INDEX])
-      } else {
-        None
-      },
-    })
   }
 }
 

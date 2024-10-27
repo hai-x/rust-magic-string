@@ -1,7 +1,8 @@
 use crate::{
   error::{Error, MsErrType},
   internal_magic_string::{
-    GenerateMapOptions, MagicStringOptions, OverwriteOptions, __internal_magic_string,
+    GenerateMapOptions, IndentOptions, MagicStringOptions, OverwriteOptions,
+    __internal_magic_string,
   },
   source_map::{DecodedMap, SourceMap},
   utils::JsRegExp,
@@ -21,14 +22,9 @@ impl MagicString {
   }
 
   #[napi]
-  pub fn insert(&mut self) -> Result<()> {
-    Err(
-      Error::from_reason(
-        MsErrType::Deprecated,
-        "magicString.insert(...) is deprecated. Use prependRight(...) or appendLeft(...)",
-      )
-      .into(),
-    )
+  pub fn add_sourcemap_location(&mut self, index: u32) -> Result<&Self> {
+    self.0.add_sourcemap_location(index);
+    Ok(self)
   }
 
   #[napi]
@@ -41,6 +37,48 @@ impl MagicString {
   pub fn append_left(&mut self, index: u32, input: String) -> Result<&Self> {
     self.0.append_left(index, input.as_str())?;
     Ok(self)
+  }
+
+  #[napi]
+  pub fn clone(&self) -> MagicString {
+    let ms = self.0.clone();
+    MagicString(ms)
+  }
+
+  #[napi]
+  pub fn generate_map(&mut self, options: Option<GenerateMapOptions>) -> Result<SourceMap> {
+    let map = self.0.generate_map(options)?;
+    Ok(map)
+  }
+
+  #[napi]
+  pub fn generate_decoded_map(
+    &mut self,
+    options: Option<GenerateMapOptions>,
+  ) -> Result<DecodedMap> {
+    let map = self.0.generate_decoded_map(options)?;
+    Ok(map)
+  }
+
+  #[napi]
+  pub fn indent(
+    &mut self,
+    indent_str: Option<String>,
+    options: Option<IndentOptions>,
+  ) -> Result<&Self> {
+    self.0.indent(indent_str, options)?;
+    Ok(self)
+  }
+
+  #[napi]
+  pub fn insert(&mut self) -> Result<()> {
+    Err(
+      Error::from_reason(
+        MsErrType::Deprecated,
+        "magicString.insert(...) is deprecated. Use prependRight(...) or appendLeft(...)",
+      )
+      .into(),
+    )
   }
 
   #[napi]
@@ -169,12 +207,6 @@ impl MagicString {
   }
 
   #[napi]
-  pub fn clone(&self) -> MagicString {
-    let ms = self.0.clone();
-    MagicString(ms)
-  }
-
-  #[napi]
   pub fn snip(&mut self, start: i32, end: i32) -> Result<MagicString> {
     let ms = self.0.snip(start, end)?;
     Ok(MagicString(ms))
@@ -268,20 +300,5 @@ impl MagicString {
     }
 
     Ok(self)
-  }
-
-  #[napi]
-  pub fn generate_map(&mut self, options: Option<GenerateMapOptions>) -> Result<SourceMap> {
-    let map = self.0.generate_map(options)?;
-    Ok(map)
-  }
-
-  #[napi]
-  pub fn generate_decoded_map(
-    &mut self,
-    options: Option<GenerateMapOptions>,
-  ) -> Result<DecodedMap> {
-    let map = self.0.generate_decoded_map(options)?;
-    Ok(map)
   }
 }

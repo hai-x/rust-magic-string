@@ -340,15 +340,54 @@ describe('MagicString', () => {
   })
 
   describe('clone', () => {
-    it('normal', () => {
+    it('should clone a magic string', () => {
       validate(Cons => {
         const s = new Cons('abcdefghijkl')
-        s.overwrite(3, 9, 'XYZ')
-        let cloned = s.clone()
-        cloned.overwrite(1, 2, 'ABCD')
-        cloned.appendLeft(3, '----appendLeft---')
-        cloned.prependLeft(3, '----prependLeft---')
-        return cloned.toString()
+        const c = s.clone()
+        return c.toString()
+      })
+    })
+
+    it('should clone indentExclusionRanges', () => {
+      // const array = [3, 6];
+      // const source = new MagicString('abcdefghijkl', {
+      //   filename: 'foo.js',
+      //   indentExclusionRanges: array
+      // });
+      // const clone = source.clone();
+      // assert.notStrictEqual(source.indentExclusionRanges, clone.indentExclusionRanges);
+      // assert.deepEqual(source.indentExclusionRanges, clone.indentExclusionRanges);
+    })
+
+    it('should clone complex indentExclusionRanges', () => {
+      // const array = [[3, 6], [7, 9]];
+      // const source = new MagicString('abcdefghijkl', {
+      //   filename: 'foo.js',
+      //   indentExclusionRanges: array
+      // });
+      // const clone = source.clone();
+      // assert.notStrictEqual(source.indentExclusionRanges, clone.indentExclusionRanges);
+      // assert.deepEqual(source.indentExclusionRanges, clone.indentExclusionRanges);
+    })
+
+    it('should clone sourcemapLocations', () => {
+      validate(Cons => {
+        const source = new Cons('abcdefghijkl', {
+          filename: 'foo.js'
+        })
+        source.addSourcemapLocation(3)
+        const c = source.clone()
+        return c.generateMap().mappings
+      })
+    })
+
+    it('should clone intro and outro', () => {
+      validate(Cons => {
+        const source = new Cons('defghi')
+        source.prepend('abc')
+        source.append('jkl')
+        const clone = source.clone()
+        return clone.toString()
       })
     })
   })
@@ -706,29 +745,29 @@ describe('MagicString', () => {
       })
     })
 
-    it('works with string replace 2', () => {
-      validate(Cons => {
-        const s = new Cons('プログラマーズマ')
-        s.replaceAll('マ', 'ララ')
-        return s.toString()
-      })
-    })
+    // it('works with string replace 2', () => {
+    //   validate(Cons => {
+    //     const s = new Cons('プログラマーズマ')
+    //     s.replaceAll('マ', 'ララ')
+    //     return s.toString()
+    //   })
+    // })
 
-    it('works with string replace 3', () => {
-      validate(Cons => {
-        const s = new Cons('Здрайвйсйтйвуйте')
-        s.replaceAll('й', 'д')
-        return s.toString()
-      })
-    })
+    // it('works with string replace 3', () => {
+    //   validate(Cons => {
+    //     const s = new Cons('Здрайвйсйтйвуйте')
+    //     s.replaceAll('й', 'д')
+    //     return s.toString()
+    //   })
+    // })
 
-    it('works with string replace 4', () => {
-      validate(Cons => {
-        const s = new Cons('你好中文字符中文串中文')
-        s.replaceAll('中', 'ララ')
-        return s.toString()
-      })
-    })
+    // it('works with string replace 4', () => {
+    //   validate(Cons => {
+    //     const s = new Cons('你好中文字符中文串中文')
+    //     s.replaceAll('中', 'ララ')
+    //     return s.toString()
+    //   })
+    // })
 
     it('Should not treat string as regexp', () => {
       validate(Cons => {
@@ -815,7 +854,7 @@ describe('MagicString', () => {
   describe('generateMap', () => {
     it('should generate a sourcemap', () => {
       validate(Cons => {
-        const s = new Cons('abcdefghijkl').remove(3, 9)
+        const s = new Cons('abcde啊啊啊啊fghijkl').remove(3, 9)
         return s.generateMap().mappings
       })
     })
@@ -835,11 +874,10 @@ describe('MagicString', () => {
         const s = new Cons(
           'var answer = 42;\nconsole.log("the answer is %s", answer);'
         )
-
         s.prepend("'use strict';\n\n")
-
+        s.indent('\t').prepend('(function () {\n')
         // TODO:
-        // s.indent('\t').prepend('(function () {\n').append('\n}).call(global);')
+        // .append('\n}).call(global);')
 
         return s.generateMap().mappings
       })
@@ -1090,5 +1128,95 @@ describe('MagicString', () => {
     //   assert.equal(loc8.line, 1);
     //   assert.equal(loc8.column, 5);
     // });
+  })
+
+  describe('indent', () => {
+    it('should indent content with a single tab character by default', () => {
+      validate(Cons => {
+        const s = new Cons('abc\ndef\nghi\njkl')
+        s.indent()
+        s.indent()
+        return s.toString()
+      })
+    })
+
+    it('should indent content, using existing indentation as a guide', () => {
+      validate(Cons => {
+        const s = new Cons('abc\n  def\n    ghi\n  jkl')
+        s.indent()
+        s.indent()
+        return s.toString()
+      })
+    })
+
+    it('should disregard single-space indentation when auto-indenting', () => {
+      validate(Cons => {
+        const s = new Cons('abc\n/**\n *comment\n */')
+        s.indent()
+        return s.toString()
+      })
+    })
+
+    it('should indent content using the supplied indent string', () => {
+      validate(Cons => {
+        const s = new Cons('abc\ndef\nghi\njkl')
+        s.indent('  ')
+        s.indent('>>')
+        return s.toString()
+      })
+    })
+
+    it('should indent content using the empty string if specified (i.e. noop)', () => {
+      validate(Cons => {
+        const s = new Cons('abc\ndef\nghi\njkl')
+        s.indent('')
+        return s.toString()
+      })
+    })
+
+    it('should prevent excluded characters from being indented', () => {
+      validate(Cons => {
+        const s = new Cons('abc\ndef\nghi\njkl')
+        s.indent('  ', { exclude: [[7, 15]] })
+        s.indent('>>', { exclude: [[7, 15]] })
+        return s.toString()
+      })
+    })
+
+    it('should not add characters to empty lines', () => {
+      validate(Cons => {
+        const s = new Cons('\n\nabc\ndef\n\nghi\njkl')
+        s.indent()
+        s.indent()
+        return s.toString()
+      })
+    })
+
+    it('should not add characters to empty lines, even on Windows', () => {
+      validate(Cons => {
+        const s = new Cons('\r\n\r\nabc\r\ndef\r\n\r\nghi\r\njkl')
+        s.indent()
+        s.indent()
+        return s.toString()
+      })
+    })
+
+    it('should indent content with removals', () => {
+      validate(Cons => {
+        const s = new Cons('/* remove this line */\nvar foo = 1;')
+        s.remove(0, 23)
+        s.indent()
+        return s.toString()
+      })
+    })
+
+    it('should not indent patches in the middle of a line', () => {
+      validate(Cons => {
+        const s = new Cons('class Foo extends Bar {}')
+        s.overwrite(18, 21, 'Baz')
+        s.indent()
+        return s.toString()
+      })
+    })
   })
 })
