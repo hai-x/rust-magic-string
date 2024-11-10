@@ -1,5 +1,5 @@
 const MagicString = require('magic-string')
-const { MagicString: RustMagicString } = require('.')
+const { MagicString: RustMagicString } = require('fast-magic-string')
 
 function getClassMethods(cls) {
   const prototype = cls.prototype

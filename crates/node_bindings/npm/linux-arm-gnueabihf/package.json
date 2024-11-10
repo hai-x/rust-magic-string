@@ -1,0 +1,18 @@
+{
+  "name": "@fast-magic-string/node_bindings-linux-arm-gnueabihf",
+  "version": "0.0.0",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm"
+  ],
+  "main": "node_bindings.linux-arm-gnueabihf.node",
+  "files": [
+    "node_bindings.linux-arm-gnueabihf.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  }
+}

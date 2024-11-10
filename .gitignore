@@ -197,3 +197,4 @@ Cargo.lock
 *.node
 
 /debug.js
+/benchmark.js
